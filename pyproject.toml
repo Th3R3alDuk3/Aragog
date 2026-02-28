@@ -1,0 +1,66 @@
+[project]
+name = "advanced-rag"
+version = "0.1.0"
+description = "Advanced Hybrid RAG — FastAPI + Haystack + Qdrant"
+requires-python = ">=3.13"
+dependencies = [
+    # Core framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-multipart>=0.0.12",
+    # Haystack 2.x  —  2.25.1 is the current stable release (Feb 2026)
+    # SentenceTransformersSimilarityRanker (replaces deprecated TransformersSimilarityRanker)
+    # was introduced in 2.9.  HierarchicalDocumentSplitter available since 2.7.
+    "haystack-ai>=2.25.1",
+    # Qdrant integration (dense + sparse named-vector collection)
+    "qdrant-haystack>=10.2.0",
+    # Sparse embeddings: SPLADE / BM42 via FastEmbed (local ONNX, no API)
+    "fastembed-haystack>=2.1.0",
+    # Pydantic settings
+    "pydantic-settings>=2.0",
+    "pydantic>=2.0",
+    # HTTP client (used by gradio_client internally)
+    "httpx>=0.27.0",
+    # Gradio client — calls the docling-serve Gradio API
+    "gradio_client>=1.0.0",
+    # HuggingFace — dense embeddings + cross-encoder reranker (local inference)
+    "sentence-transformers>=3.0.0",
+    "transformers>=4.40.0",
+    "torch>=2.0.0",
+    # OpenAI SDK — for OpenAI-compatible LLM endpoints
+    # (OpenAI, Ollama, vLLM, LM Studio, Groq, …)
+    "openai>=1.0.0",
+    # Language detection — used by MetadataEnricher (local, no API)
+    "langdetect>=1.0.9",
+    # SSE streaming responses (POST /query/stream)
+    "sse-starlette>=2.1.0",
+    # ColBERT late-interaction reranker (local HuggingFace, no index change needed)
+    "pylate>=1.1.0",
+    # MinIO — object storage client for original document files
+    "minio>=7.0.0",
+    # RAGAS evaluation framework (lazy-imported, only when RAGAS_ENABLED=true)
+    "ragas>=0.2.0",
+    "datasets>=2.0.0",
+    "nltk>=3.9.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Tell hatchling which sub-packages to include (this is an app, not a library)
+[tool.hatch.build.targets.wheel]
+packages = ["components", "pipelines", "routers", "models"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",   # for FastAPI TestClient
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
