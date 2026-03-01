@@ -20,19 +20,20 @@ FastAPI route handlers and dependency injection for the Advanced Hybrid RAG API.
 
 ### `POST /documents/index`
 
-Indexes one document into Qdrant.
+Starts async ingestion of a document into Qdrant. Returns immediately with a `task_id`.
+Poll **GET /tasks/{task_id}** to track progress.
 
 **Request:** `multipart/form-data` — single file upload (`file` field)
 
-**Response:**
+**Response (HTTP 202):**
 ```json
-{ "indexed": 87, "source": "jahresbericht.pdf", "minio_url": "http://localhost:9000/rag-docs/abcd1234-jahresbericht.pdf" }
+{ "task_id": "3fa85f64-...", "source": "jahresbericht.pdf", "message": "Ingestion started. Poll /tasks/{task_id} for progress." }
 ```
 
-**Pipeline:** `DoclingConverter → MetadataEnricher → … → QdrantDocumentStore`
-
-Runs synchronously inside the async route handler. For large PDFs this blocks
-the event loop during conversion; wrap in a task queue if needed for production.
+**Pipeline stages (visible in `GET /tasks/{task_id}`):**
+`deleting_stale → uploading_minio → converting → enriching_metadata → cleaning
+→ splitting_headers → splitting_chunks → enriching_chunks → analyzing_content
+→ [summarizing_raptor] → embedding_dense → embedding_sparse → writing → done`
 
 ---
 
@@ -159,7 +160,7 @@ const reader = response.body.getReader();
 
 **Implementation:** Retrieval runs synchronously via `asyncio.to_thread()`.
 LLM generation uses `AsyncOpenAI.chat.completions.create(stream=True)`.
-The `RAG_PROMPT` Jinja2 template is imported from `pipelines/retrieval_pipeline.py` and
+The `RAG_PROMPT` Jinja2 template is imported from `pipelines/retrieval.py` and
 rendered with the standard `jinja2` library.
 
 ---
@@ -233,8 +234,8 @@ FastAPI dependency functions that fetch pipeline instances from `app.state`
 | Function | Returns | Notes |
 |----------|---------|-------|
 | `get_document_store` | `QdrantDocumentStore` | |
-| `get_indexing_pipeline` | `Pipeline` | |
-| `get_query_pipeline` | `Pipeline` | Retrieval pipeline |
+| `get_ingestion_pipeline` | `Pipeline` | |
+| `get_retrieval_pipeline` | `Pipeline` | |
 | `get_generation_pipeline` | `Pipeline` | Prompt/LLM/answer pipeline |
 | `get_query_analyzer` | `QueryAnalyzer` | |
 | `get_hyde_generator` | `HyDEGenerator \| None` | None when `HYDE_ENABLED=false` |

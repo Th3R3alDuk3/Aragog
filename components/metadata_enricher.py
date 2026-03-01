@@ -52,15 +52,15 @@ class MetadataEnricher:
     Enriches full (pre-split) documents with document-level metadata.
 
     Args:
-        embedding_model:     Model identifier recorded in metadata.
         embedding_provider:  Provider name recorded in metadata.
+        embedding_model:     Model identifier recorded in metadata.
         embedding_dimension: Vector dimension recorded in metadata.
     """
 
     def __init__(
         self,
-        embedding_model: str,
         embedding_provider: str,
+        embedding_model: str,
         embedding_dimension: int,
         doc_beginning_chars: int = 1500,
     ) -> None:
@@ -71,11 +71,16 @@ class MetadataEnricher:
 
     @component.output_types(documents=list[Document])
     def run(self, documents: list[Document], extra_meta: dict | None = None) -> dict[str, list[Document]]:
-        """
+        """Enrich each document with stable, document-level metadata fields.
+
+        Adds doc_id, title, word_count, indexed_at timestamps, detected language,
+        doc_beginning (for downstream LLM context), and embedding provenance.
+        All fields are inherited by every chunk produced by downstream splitters.
+
         Args:
-            documents:  Raw documents from DoclingConverter.
-            extra_meta: Optional key/value pairs merged into every document's meta
-                        (e.g. ``{"minio_url": "...", "minio_key": "..."}``).
+            documents:  Raw documents from DoclingConverter (one per source file).
+            extra_meta: Optional key/value pairs merged into every document's
+                        metadata (e.g. ``{"minio_url": "...", "minio_key": "..."}``).
         """
         enriched: list[Document] = []
 
@@ -152,7 +157,15 @@ class MetadataEnricher:
 # ---------------------------------------------------------------------------
 
 def _extract_title(content: str, source: str) -> str:
-    """Return the first H1 heading in the markdown, or the filename stem."""
+    """Return the first H1 heading found in the markdown, or derive a title from the filename.
+
+    Args:
+        content: Full markdown text of the document.
+        source:  Original filename (used as fallback when no H1 is present).
+
+    Returns:
+        Title string — never empty, falls back to ``"Untitled"`` as last resort.
+    """
     for match in _HEADING_RE.finditer(content):
         if len(match.group(1)) == 1:          # exactly one '#' → H1
             return match.group(2).strip()
@@ -166,10 +179,16 @@ def _extract_title(content: str, source: str) -> str:
 
 
 def _detect_language(content: str) -> str:
-    """Detect the document's language using langdetect.
+    """Detect the document's primary language using langdetect.
 
-    Uses the first 2000 characters for speed; falls back to 'unknown' on
-    any error (e.g. empty documents, mixed-script text, or missing package).
+    Samples the first 2 000 characters for speed. Falls back to ``"unknown"``
+    on any error (empty document, mixed-script text, or missing package).
+
+    Args:
+        content: Raw document text to detect the language of.
+
+    Returns:
+        ISO 639-1 language code (e.g. ``"en"``, ``"de"``), or ``"unknown"``.
     """
     if not _LANGDETECT_AVAILABLE:
         return "unknown"

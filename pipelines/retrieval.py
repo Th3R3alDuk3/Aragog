@@ -1,5 +1,5 @@
 """
-Query pipeline — Advanced Hybrid RAG (Haystack 2.x + Qdrant)
+Retrieval pipeline — Advanced Hybrid RAG (Haystack 2.x + Qdrant)
 
 Pipeline flow per sub-question
 ───────────────────────────────
@@ -17,24 +17,13 @@ Pipeline flow per sub-question
                                    DocumentJoiner (Reciprocal Rank Fusion)
                                                      │
                               SentenceTransformersSimilarityRanker (cross-encoder)
-                                                     │
-                                         [swap_to_parent_content]
-                                           replace doc.content with
-                                           meta["parent_content"]
-                                           for richer LLM context
-                                                     │
-                                           PromptBuilder
-                                                     │
-                                          OpenAIGenerator
-                                                     │
-                                           AnswerBuilder
 
 Multi-question handling
 ───────────────────────
-Multi-question decomposition happens at the ROUTER layer (routers/query.py),
-not inside this pipeline.  The router calls QueryDecomposer, runs this
-pipeline once per sub-question, merges document sets, and calls the
-LLM once with the combined context addressing all sub-questions.
+Multi-question decomposition happens at the router layer (routers/query.py),
+not inside this pipeline.  The router calls QueryAnalyzer, runs this
+pipeline once per sub-question, merges document sets, and then passes the
+combined context to the generation pipeline.
 
 Parent-child retrieval
 ──────────────────────
@@ -44,8 +33,7 @@ meta["parent_content"] (full markdown section) before the LLM
 generates its answer — broader context without sacrificing retrieval precision.
 """
 
-from haystack import Pipeline
-from haystack.components.builders import AnswerBuilder, PromptBuilder
+from haystack import Document, Pipeline
 from haystack.components.joiners import DocumentJoiner
 from haystack_integrations.components.retrievers.qdrant import (
     QdrantEmbeddingRetriever,
@@ -55,60 +43,33 @@ from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from config import Settings
 from pipelines._embedders import (
-    build_generator,
     build_reranker,
     build_sparse_text_embedder,
     build_text_embedder,
 )
 
-# ---------------------------------------------------------------------------
-# RAG prompt — multi-question aware
-# ---------------------------------------------------------------------------
-RAG_PROMPT = """\
-You are a precise, helpful assistant. Answer the question(s) below using ONLY
-the provided context documents.  If the context does not contain sufficient
-information to answer a question, state that clearly instead of guessing.
-Do not invent facts.
 
-{% if questions | length > 1 %}
-The user asked multiple questions. Address each one separately and clearly.
-
-Questions:
-{% for q in questions %}
-  {{ loop.index }}. {{ q }}
-{% endfor %}
-{% else %}
-Question: {{ questions[0] }}
-{% endif %}
-
-Context documents:
-{% for doc in documents %}
-────────────────────────────────────────
-Source  : {{ doc.meta.get("source", "unknown") }}
-Section : {{ doc.meta.get("section_title", "") }}
-{% if doc.meta.get("summary") %}Summary : {{ doc.meta.get("summary") }}
-{% endif %}
-{{ doc.content }}
-{% endfor %}
-────────────────────────────────────────
-
-Answer:"""
-
-
-def build_query_pipeline(
+def build_retrieval_pipeline(
     settings: Settings,
     document_store: QdrantDocumentStore,
-) -> tuple[Pipeline, Pipeline]:
-    """
-    Returns (retrieval_pipeline, generation_pipeline).
+) -> Pipeline:
+    """Build the hybrid retrieval pipeline.
 
-    Keeping retrieval and generation as separate pipelines avoids Haystack's
-    mandatory-input validation: PromptBuilder requires ``questions`` at runtime,
-    which is only available after all sub-question retrievals are merged.
-    Running one combined pipeline per sub-question would force an LLM call each
-    time — defeating the single-LLM-call design.
+    Combines dense and sparse retrievers via Reciprocal Rank Fusion, followed
+    by a cross-encoder reranker.  Called once at startup; the returned pipeline
+    is reused for every query.
+
+    Args:
+        settings:       Application settings for retriever top-k values and
+                        embedder/reranker model configuration.
+        document_store: Shared QdrantDocumentStore instance (created by the
+                        ingestion pipeline builder).
+
+    Returns:
+        A Haystack ``Pipeline`` with components ``dense_embedder``,
+        ``sparse_embedder``, ``dense_retriever``, ``sparse_retriever``,
+        ``joiner``, and ``reranker`` wired in sequence.
     """
-    # ── Retrieval pipeline ────────────────────────────────────────────────────
     dense_embedder   = build_text_embedder(settings)
     sparse_embedder  = build_sparse_text_embedder(settings)
     dense_retriever  = QdrantEmbeddingRetriever(
@@ -138,21 +99,7 @@ def build_query_pipeline(
     retrieval.connect("sparse_retriever.documents",       "joiner.documents")
     retrieval.connect("joiner.documents",                 "reranker.documents")
 
-    # ── Generation pipeline ───────────────────────────────────────────────────
-    # documents and questions are runtime inputs — no upstream connections needed.
-    prompt_builder = PromptBuilder(template=RAG_PROMPT, required_variables=["questions", "documents"])
-    generator      = build_generator(settings)
-    answer_builder = AnswerBuilder()
-
-    generation = Pipeline()
-    generation.add_component("prompt_builder", prompt_builder)
-    generation.add_component("llm",            generator)
-    generation.add_component("answer_builder", answer_builder)
-    generation.connect("prompt_builder.prompt", "llm.prompt")
-    generation.connect("llm.replies",           "answer_builder.replies")
-    generation.connect("llm.meta",              "answer_builder.meta")
-
-    return retrieval, generation
+    return retrieval
 
 
 # ---------------------------------------------------------------------------
@@ -160,18 +107,22 @@ def build_query_pipeline(
 # ---------------------------------------------------------------------------
 
 def swap_to_parent_content(documents: list) -> list:
-    """
-    Replace each retrieved child chunk's content with its parent section text.
+    """Replace each retrieved child chunk's content with its parent section text.
 
-    Called by the router AFTER retrieval, BEFORE passing documents to the
-    PromptBuilder.  Gives the LLM full section context while keeping
+    Called by the router after retrieval, before passing documents to the
+    generation pipeline.  Gives the LLM full section context while keeping
     retrieval precise (small child chunks for embedding/retrieval).
 
-    If a document has no parent_content the original content is kept.
+    If a document has no ``parent_content`` the original content is kept.
     Deduplicates by parent content to avoid sending the same section twice.
-    """
-    from haystack import Document
 
+    Args:
+        documents: Retrieved child chunk documents from the reranker.
+
+    Returns:
+        Deduplicated list of documents with content replaced by
+        ``meta["parent_content"]`` where available.
+    """
     seen: set[str] = set()
     result: list[Document] = []
 

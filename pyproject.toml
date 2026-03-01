@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 dependencies = [
     # Core framework
     "fastapi>=0.115.0",
+    "fastapi-offline>=1.7.0",
     "uvicorn[standard]>=0.32.0",
     "python-multipart>=0.0.12",
     # Haystack 2.x  —  2.25.1 is the current stable release (Feb 2026)
@@ -50,17 +51,9 @@ build-backend = "hatchling.build"
 
 # Tell hatchling which sub-packages to include (this is an app, not a library)
 [tool.hatch.build.targets.wheel]
-packages = ["components", "pipelines", "routers", "models"]
+packages = ["components", "pipelines", "routers", "models", "services"]
 
 [dependency-groups]
 dev = [
-    "pytest",
-    "pytest-asyncio",
     "httpx",   # for FastAPI TestClient
 ]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]

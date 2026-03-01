@@ -13,8 +13,8 @@ section) and implements the parent-child chunking strategy:
     ``RecursiveDocumentSplitter``.  Every child receives the full original
     section text in ``meta["parent_content"]``.
 
-This is the second half of the Anthropic Contextual Retrieval Option A
-splitting strategy:
+This component implements the size-budget and parent-child linking step of
+Anthropic Contextual Retrieval:
     1. ``MarkdownHeaderSplitter`` — semantic section boundaries (built-in)
     2. ``ParentChildSplitter``    — size budget + parent-child linking (this file)
 
@@ -59,6 +59,20 @@ class ParentChildSplitter:
 
     @component.output_types(documents=list[Document])
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
+        """Split oversized sections into child chunks and link each child to its parent.
+
+        Sections that fit within ``child_chunk_size`` words are passed through
+        unchanged. Larger sections are split by ``RecursiveDocumentSplitter``
+        and each resulting chunk receives the full section text in
+        ``meta["parent_content"]`` for later use during answer generation.
+
+        Args:
+            documents: Section documents from MarkdownHeaderSplitter.
+
+        Returns:
+            A dict with key ``"documents"`` containing one or more child chunks
+            per input section.
+        """
         output: list[Document] = []
         child_count = 0
 
@@ -89,7 +103,16 @@ class ParentChildSplitter:
 # ---------------------------------------------------------------------------
 
 def _with_parent(child: Document, parent_text: str) -> Document:
-    """Return a new Document with parent_content in meta."""
+    """Return a copy of ``child`` with ``parent_content`` added to its metadata.
+
+    Args:
+        child:       The child chunk document.
+        parent_text: Full text of the section the child was split from.
+
+    Returns:
+        A new Document identical to ``child`` but with ``parent_content`` and
+        ``parent_section`` set in its metadata.
+    """
     meta: dict[str, Any] = dict(child.meta)
     meta["parent_content"] = parent_text
     meta["parent_section"] = meta.get("header", "")

@@ -1,16 +1,35 @@
-from datetime import date
-from typing import Any
-from pydantic import BaseModel, Field
+from datetime import date, datetime
+from typing import Any, Literal
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
-# Indexing
+# Ingestion / Task tracking
 # ---------------------------------------------------------------------------
 
 class IndexResponse(BaseModel):
-    indexed:   int       = Field(..., description="Number of document chunks written to Qdrant")
-    source:    str       = Field(..., description="Original filename")
+    indexed:   int        = Field(..., description="Number of document chunks written to Qdrant")
+    source:    str        = Field(..., description="Original filename")
     minio_url: str | None = Field(None, description="URL of the original file in MinIO")
+
+
+class TaskCreatedResponse(BaseModel):
+    task_id: str = Field(..., description="Unique task ID — poll GET /tasks/{task_id} for progress")
+    source:  str = Field(..., description="Uploaded filename")
+    message: str = "Ingestion started. Poll /tasks/{task_id} for progress."
+
+
+class TaskState(BaseModel):
+    model_config = ConfigDict(frozen=False)  # fields are mutated by the ingestion service
+
+    task_id:    str      = Field(..., description="Unique task ID")
+    status:     Literal["pending", "running", "done", "failed"] = Field(..., description="Task lifecycle status")
+    step:       str      = Field(..., description="Current pipeline step")
+    source:     str      = Field(..., description="Uploaded filename")
+    created_at: datetime = Field(..., description="Task creation time (UTC)")
+    updated_at: datetime = Field(..., description="Last status update time (UTC)")
+    result:     IndexResponse | None = Field(None, description="Populated when status=done")
+    error:      str | None           = Field(None, description="Error message when status=failed")
 
 
 # ---------------------------------------------------------------------------

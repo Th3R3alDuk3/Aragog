@@ -1,6 +1,6 @@
 # Pipelines
 
-Haystack 2.x pipeline definitions for indexing and querying.
+Haystack 2.x pipeline definitions for ingestion and retrieval.
 
 ---
 
@@ -8,15 +8,15 @@ Haystack 2.x pipeline definitions for indexing and querying.
 
 | File | Purpose |
 |------|---------|
-| `ingestion_pipeline.py` | Indexing pipeline (10 core stages + optional RAPTOR): document conversion → Qdrant write |
-| `retrieval_pipeline.py` | Query pipeline builders: retrieval DAG (dual retrieval → RRF → reranker) + generation DAG (prompt → LLM → answer) |
+| `ingestion.py` | Ingestion pipeline (10 core stages + optional RAPTOR): document conversion → Qdrant write |
+| `retrieval.py` | Query pipeline builders: retrieval DAG (dual retrieval → RRF → reranker) + generation DAG (prompt → LLM → answer) |
 | `_embedders.py` | Factory functions for embedder/reranker/generator components |
 
 ---
 
-## Indexing Pipeline
+## Ingestion Pipeline
 
-Defined in `build_indexing_pipeline(settings)`. Returns `(Pipeline, QdrantDocumentStore)`.
+Defined in `build_ingestion_pipeline(settings)`. Returns `(Pipeline, QdrantDocumentStore)`.
 
 ### Stage-by-stage flow
 
@@ -94,13 +94,13 @@ else:
 - `recreate_index=False` — safe for re-indexing existing collection
 
 The document store is returned alongside the pipeline so `main.py` can pass the
-same instance to `build_query_pipeline()` — no duplicate Qdrant connections.
+same instance to `build_retrieval_pipeline()` — no duplicate Qdrant connections.
 
 ---
 
-## Query Pipeline
+## Retrieval Pipeline
 
-Defined in `build_query_pipeline(settings, document_store)`.
+Defined in `build_retrieval_pipeline(settings, document_store)`.
 Returns `(retrieval_pipeline, generation_pipeline)`.
 
 **Note:** Multi-question decomposition, HyDE, CRAG, and ColBERT reranking are handled
@@ -178,10 +178,10 @@ prompt_text = Environment().from_string(RAG_PROMPT).render(documents=..., questi
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `build_document_embedder(settings)` | `SentenceTransformersDocumentEmbedder` | Dense, for indexing |
-| `build_text_embedder(settings)` | `SentenceTransformersTextEmbedder` | Dense, for querying |
-| `build_sparse_document_embedder(settings)` | `FastembedSparseDocumentEmbedder` | Sparse, for indexing |
-| `build_sparse_text_embedder(settings)` | `FastembedSparseTextEmbedder` | Sparse, for querying |
+| `build_document_embedder(settings)` | `SentenceTransformersDocumentEmbedder` | Dense, for ingestion |
+| `build_text_embedder(settings)` | `SentenceTransformersTextEmbedder` | Dense, for retrieval |
+| `build_sparse_document_embedder(settings)` | `FastembedSparseDocumentEmbedder` | Sparse, for ingestion |
+| `build_sparse_text_embedder(settings)` | `FastembedSparseTextEmbedder` | Sparse, for retrieval |
 | `build_reranker(settings)` | `SentenceTransformersSimilarityRanker` | Cross-encoder |
 | `build_generator(settings)` | `OpenAIGenerator` | OpenAI-compatible LLM |
 
@@ -202,7 +202,7 @@ All factories read from `Settings` (populated from `.env`) and require no argume
 | `SPARSE_RETRIEVER_TOP_K` | `20` | Sparse retriever candidates |
 | `CHILD_CHUNK_SIZE` | `200` | Words per child chunk |
 | `CHILD_CHUNK_OVERLAP` | `20` | Word overlap between child chunks |
-| `ANALYZER_LLM_MODEL` | `gpt-4o-mini` | Model for indexing LLM calls |
+| `ANALYZER_LLM_MODEL` | `gpt-4o-mini` | Model for ingestion LLM calls |
 | `ANALYZER_MAX_WORKERS` | `4` | Parallel ContentAnalyzer threads |
 | `RAPTOR_ENABLED` | `false` | Enable RAPTOR summary chunks |
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant server URL |

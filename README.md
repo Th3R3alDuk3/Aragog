@@ -8,7 +8,7 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        INDEXING PIPELINE                            │
+│                        INGESTION PIPELINE                           │
 │                                                                     │
 │  PDF/DOCX/…                                                         │
 │      │                                                              │
@@ -43,7 +43,7 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 └──────────────────────────────────────────────────────────────────┼──┘
                                                                    │
 ┌──────────────────────────────────────────────────────────────────┼──┐
-│                        QUERY PIPELINE                             │  │
+│                        RETRIEVAL PIPELINE                          │  │
 │                                                                   │  │
 │  User query                                                       │  │
 │      │                                                            │  │
@@ -203,7 +203,6 @@ The system works with any **OpenAI-compatible** endpoint:
 |--------|------|-------------|
 | `POST` | `/documents/index` | Upload & index a document |
 | `POST` | `/query` | Query the RAG system |
-| `GET`  | `/health` | Health check + document count |
 | `GET`  | `/docs` | Interactive Swagger UI |
 | `GET`  | `/redoc` | ReDoc API documentation |
 
@@ -218,7 +217,6 @@ PDF, DOCX, PPTX, XLSX, HTML, TXT, Markdown — all converted via docling-serve.
 ## Configuration reference
 
 See [.env](.env) for all settings with inline documentation.
-See [SCHEMA.md](SCHEMA.md) for the full metadata field specification.
 See [docs/architecture.md](docs/architecture.md) for deep-dive on each design decision.
 
 ---
@@ -246,7 +244,7 @@ RAG/
 │   ├── content_analyzer.py     ← LLM: context_prefix + semantic metadata
 │   └── query_analyzer.py       ← multi-question decomposition + auto filter extraction
 ├── pipelines/
-│   ├── ingestion_pipeline.py   ← full indexing DAG
+│   ├── ingestion_pipeline.py   ← full ingestion DAG
 │   ├── retrieval_pipeline.py   ← retrieval + generation DAG builders + shared RAG prompt
 │   └── _embedders.py           ← HF dense, SPLADE sparse, reranker, LLM
 └── routers/

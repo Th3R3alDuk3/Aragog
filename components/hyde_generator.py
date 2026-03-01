@@ -68,9 +68,9 @@ class HyDEGenerator:
 
     def __init__(
         self,
+        openai_base_url: str,
         openai_api_key: str,
         llm_model: str,
-        openai_base_url: str = "",
     ) -> None:
         client_kwargs: dict[str, Any] = {"api_key": openai_api_key}
         if openai_base_url:
@@ -79,11 +79,20 @@ class HyDEGenerator:
         self._llm_model = llm_model
 
     def generate(self, query: str) -> str:
-        """
-        Return a hypothetical document string for the given query.
+        """Generate a hypothetical document passage for the given query.
 
-        Falls back to the original query on any error so that retrieval
-        continues normally without any disruption.
+        The generated text is intended for dense embedding only; sparse retrieval
+        and the reranker always receive the original query unchanged.
+
+        Falls back to the original query on any LLM error so that retrieval
+        continues normally without disruption.
+
+        Args:
+            query: The user query to generate a hypothetical document for.
+
+        Returns:
+            A short declarative passage (3-5 sentences) that would answer the
+            query, or the original query string if generation fails.
         """
         try:
             result = self._call_llm(query)
@@ -95,6 +104,14 @@ class HyDEGenerator:
         return query
 
     def _call_llm(self, query: str) -> str:
+        """Call the LLM to produce a hypothetical document passage.
+
+        Args:
+            query: The user query.
+
+        Returns:
+            The raw LLM response text (may be empty).
+        """
         response = self._client.chat.completions.create(
             model    = self._llm_model,
             messages = [

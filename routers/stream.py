@@ -8,35 +8,23 @@ SSE event protocol:
   event: token   data: <token text>     (one per LLM output token)
   event: sources data: <JSON array>     (SourceDocument list, sent after stream ends)
   event: done    data: ""               (stream termination signal)
-
-Retrieval runs synchronously via asyncio.to_thread() to avoid blocking the
-async event loop.  The LLM generation uses AsyncOpenAI.chat.completions.create
-with stream=True for true async streaming.
-
-The RAG_PROMPT Jinja2 template is imported directly from pipelines/retrieval_pipeline.py
-and rendered with the standard jinja2 library (Haystack transitive dependency).
+  event: error   data: <error message>  (on LLM streaming failure)
 """
 
-import asyncio
 import json
 import logging
-from datetime import datetime, time, timezone
 from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from jinja2 import Environment
 from sse_starlette.sse import EventSourceResponse
 
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
-from models.schemas import QueryRequest, SourceDocument
-from pipelines.retrieval import RAG_PROMPT, swap_to_parent_content
-from routers._deps import get_colbert_reranker, get_hyde_generator, get_query_analyzer, get_retrieval_pipeline
-from routers.query import (
-    _analysis_to_filter_dict,
-    _build_filters,
-    _retrieve_simple,
-    _retrieve_with_crag,
-)
+from models.schemas import QueryRequest
+from pipelines.generation import RAG_PROMPT
+from routers._deps import get_colbert_reranker, get_hyde_generator, get_query_analyzer, get_retrieval_pipeline, get_settings
+from services import query as query_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,92 +42,36 @@ router = APIRouter(prefix="/query", tags=["query"])
 )
 async def query_stream(
     request: QueryRequest,
-    req: Request,
     pipeline=Depends(get_retrieval_pipeline),
     analyzer: QueryAnalyzer = Depends(get_query_analyzer),
     hyde_generator=Depends(get_hyde_generator),
     colbert_reranker=Depends(get_colbert_reranker),
+    settings: Settings = Depends(get_settings),
 ) -> EventSourceResponse:
-    settings: Settings = req.app.state.settings
-
-    # ── Analyze + filter + retrieve (same as /query) ──────────────────────────
-    analysis = analyzer.analyze(request.query)
-    sub_questions = analysis.sub_questions
     try:
-        filters = _build_filters(request, analysis)
+        ctx = await query_service.prepare_context(
+            request, settings, pipeline, analyzer, hyde_generator, colbert_reranker,
+        )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-    use_hyde = settings.hyde_enabled or request.use_hyde
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except query_service.RetrievalError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
-    all_docs_by_id: dict[str, Any] = {}
-    low_confidence = False
-
-    for sub_q in sub_questions:
-        try:
-            if settings.crag_enabled:
-                docs, lc = await _retrieve_with_crag(
-                    pipeline, sub_q, filters, settings, hyde_generator, use_hyde,
-                )
-                low_confidence = low_confidence or lc
-            else:
-                docs = await asyncio.to_thread(
-                    _retrieve_simple, pipeline, sub_q, filters, hyde_generator, use_hyde,
-                )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Retrieval failed for '{sub_q}': {exc}",
-            ) from exc
-
-        for doc in docs:
-            if doc.id not in all_docs_by_id:
-                all_docs_by_id[doc.id] = doc
-
-    if not all_docs_by_id:
+    if not ctx.merged_docs:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No relevant documents found for your query.",
         )
 
-    candidate_budget = request.top_k * max(1, len(sub_questions))
-    merged_docs = swap_to_parent_content(list(all_docs_by_id.values()))
-    merged_docs = merged_docs[:candidate_budget]
-
-    if settings.colbert_enabled and colbert_reranker is not None:
-        merged_docs = colbert_reranker.rerank(request.query, merged_docs)
-
-    # Final cut to top_k for the LLM context window
-    merged_docs = merged_docs[: request.top_k]
-
-    # ── Build sources payload for the final SSE event ─────────────────────────
     sources_payload = [
-        {
-            "content": doc.meta.get("original_content") or doc.content or "",
-            "score":   getattr(doc, "score", None),
-            "meta": {
-                k: v for k, v in doc.meta.items()
-                if k not in {"parent_content", "original_content", "doc_beginning"}
-            },
-        }
-        for doc in merged_docs
+        s.model_dump() for s in query_service.format_source_docs(ctx.merged_docs)
     ]
 
-    # ── Render the prompt ─────────────────────────────────────────────────────
-    try:
-        from jinja2 import Environment
-        prompt_text = (
-            Environment()
-            .from_string(RAG_PROMPT)
-            .render(documents=merged_docs, questions=sub_questions)
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Prompt rendering failed: {exc}",
-        ) from exc
+    prompt_text = (
+        Environment()
+        .from_string(RAG_PROMPT)
+        .render(documents=ctx.merged_docs, questions=ctx.sub_questions)
+    )
 
     return EventSourceResponse(
         _stream_generator(prompt_text, sources_payload, settings),
@@ -161,8 +93,7 @@ async def _stream_generator(
             client_kwargs["base_url"] = settings.openai_base_url
 
         client = AsyncOpenAI(**client_kwargs)
-
-        stream = await client.chat.completions.create(
+        stream  = await client.chat.completions.create(
             model    = settings.llm_model,
             messages = [{"role": "user", "content": prompt_text}],
             stream   = True,
@@ -178,6 +109,5 @@ async def _stream_generator(
         yield {"event": "error", "data": str(exc)}
         return
 
-    # Send sources as final structured event
     yield {"event": "sources", "data": json.dumps(sources_payload, default=str)}
-    yield {"event": "done", "data": ""}
+    yield {"event": "done",    "data": ""}

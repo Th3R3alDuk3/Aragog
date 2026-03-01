@@ -1,11 +1,9 @@
 """
-QueryAnalyzer — extended query decomposer.
-
-Replaces ``QueryDecomposer`` (which is aliased here for backward compatibility).
+QueryAnalyzer — multi-question decomposition + metadata filter extraction.
 
 In a single LLM call the analyzer:
   1. Detects whether the query contains multiple independent sub-questions
-     and splits them (same logic as before).
+     and splits them.
   2. Extracts structured metadata filter hints from natural language:
        date_from / date_to  — temporal constraints ("since 2024", "Q3 2023")
        classification        — document category ("financial report", "contract")
@@ -21,12 +19,6 @@ Heuristics BEFORE the LLM call
     _COMPOUND_HINTS — multi-question connectors
     _FILTER_HINTS   — date/document-type/language signals
   If either matches, the LLM is called.
-
-Backward compatibility
-──────────────────────
-``QueryDecomposer = QueryAnalyzer`` alias at the bottom keeps existing
-``main.py`` imports working without change.
-``decompose(query) → list[str]`` shim is preserved.
 """
 
 import json
@@ -136,36 +128,43 @@ class QueryAnalyzer:
     Detects compound queries AND extracts metadata filter hints in one LLM call.
 
     Args:
+        openai_base_url: Custom base URL (empty = official OpenAI API).
         openai_api_key:  API key for the LLM endpoint.
         llm_model:       OpenAI-compatible model name.
-        openai_base_url: Custom base URL (empty = official OpenAI API).
         taxonomy:        Comma-separated classification labels.
     """
 
     def __init__(
         self,
+        openai_base_url: str,
         openai_api_key: str,
         llm_model: str,
-        openai_base_url: str = "",
         taxonomy: str = (
             "financial,legal,technical,scientific,hr,"
             "marketing,contract,report,manual,correspondence,general"
         ),
     ) -> None:
-        client_kwargs: dict[str, Any] = {"api_key": openai_api_key}
-        if openai_base_url:
-            client_kwargs["base_url"] = openai_base_url
-        self._client    = OpenAI(**client_kwargs)
+        
+        self._client = OpenAI(
+            base_url = openai_base_url,
+            api_key  = openai_api_key,
+        )
+
         self._llm_model = llm_model
         self._taxonomy  = set(t.strip() for t in taxonomy.split(",") if t.strip())
         self._taxonomy_str = taxonomy
 
     def analyze(self, query: str) -> AnalysisResult:
-        """
-        Full analysis: decompose + extract filters.
+        """Decompose a query into sub-questions and extract metadata filter hints.
 
-        Fast path: if the query is short and contains no compound/filter hints,
-        returns a trivial AnalysisResult with [query] and no filters.
+        Short queries with no compound or filter signals bypass the LLM entirely
+        and return immediately with the original query as the sole sub-question.
+
+        Args:
+            query: The raw user query string.
+
+        Returns:
+            An ``AnalysisResult`` with sub-questions and any extracted filters.
         """
         query = query.strip()
         words = query.split()
@@ -176,13 +175,20 @@ class QueryAnalyzer:
 
         return self._llm_analyze(query)
 
-    def decompose(self, query: str) -> list[str]:
-        """Backward-compatible shim — returns sub_questions from analyze()."""
-        return self.analyze(query).sub_questions
-
     # ------------------------------------------------------------------
 
     def _llm_analyze(self, query: str) -> AnalysisResult:
+        """Send the query to the LLM for analysis and parse the response.
+
+        Falls back to a trivial single-question result on any LLM or parse error
+        so the query pipeline is never blocked by analysis failures.
+
+        Args:
+            query: The user query to analyze.
+
+        Returns:
+            A parsed ``AnalysisResult``, or a fallback with ``[query]`` on error.
+        """
         try:
             response = self._client.chat.completions.create(
                 model    = self._llm_model,
@@ -202,6 +208,18 @@ class QueryAnalyzer:
             return AnalysisResult(sub_questions=[query], is_compound=False)
 
     def _parse(self, data: dict, original_query: str) -> AnalysisResult:
+        """Validate and convert the LLM's parsed JSON response into an AnalysisResult.
+
+        Applies format checks on dates and source filenames, and validates the
+        classification label against the configured taxonomy.
+
+        Args:
+            data:           Parsed JSON dict from the LLM response.
+            original_query: The original query, used as fallback for sub-questions.
+
+        Returns:
+            A validated ``AnalysisResult``.
+        """
         sub_questions = data.get("sub_questions", [original_query])
         sub_questions = [str(q).strip() for q in sub_questions if str(q).strip()]
         if not sub_questions:
@@ -268,7 +286,3 @@ class QueryAnalyzer:
         )
 
 
-# ---------------------------------------------------------------------------
-# Backward-compatibility alias
-# ---------------------------------------------------------------------------
-QueryDecomposer = QueryAnalyzer

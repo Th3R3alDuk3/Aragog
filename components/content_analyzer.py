@@ -3,8 +3,8 @@ ContentAnalyzer — Haystack 2.x custom component.
 
 Makes ONE structured LLM call per chunk (parallelised) that simultaneously:
 
-1. Generates a **contextual prefix** (Anthropic Contextual Retrieval, Option A)
-   ─ A 1-2 sentence description situating this chunk within its parent document.
+1. Generates a **contextual prefix** (Anthropic Contextual Retrieval) —
+   a 1-2 sentence description that situates this chunk within its parent document.
    ─ The prefix is prepended to the chunk content BEFORE embedding, which
      significantly reduces retrieval failures on ambiguous or short chunks.
    ─ The original chunk text is preserved in ``meta["original_content"]``.
@@ -148,6 +148,18 @@ class ContentAnalyzer:
 
     @component.output_types(documents=list[Document])
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
+        """Analyze all chunks in parallel and enrich them with LLM-generated metadata.
+
+        Each chunk is processed in a separate thread. Failed chunks pass through
+        unchanged so the pipeline never stalls due to a single LLM error.
+
+        Args:
+            documents: Chunks to analyze (produced by ChunkContextEnricher).
+
+        Returns:
+            A dict with key ``"documents"`` containing the enriched chunks in
+            their original order.
+        """
         if not documents:
             return {"documents": []}
 
@@ -175,6 +187,14 @@ class ContentAnalyzer:
 
     # ------------------------------------------------------------------
     def _analyze(self, doc: Document) -> Document:
+        """Run a single LLM call for one chunk and return the enriched Document.
+
+        Args:
+            doc: The chunk to analyze.
+
+        Returns:
+            A new Document with analysis fields merged into its metadata.
+        """
         content = (doc.content or "")[: self.max_chars]
         meta    = doc.meta
 
@@ -200,6 +220,14 @@ class ContentAnalyzer:
         return _apply(doc, analysis)
 
     def _call_llm(self, prompt: str) -> str:
+        """Send the analysis prompt to the LLM and return the raw response text.
+
+        Args:
+            prompt: Fully formatted user prompt (chunk content + context).
+
+        Returns:
+            Raw response string from the LLM (expected to be valid JSON).
+        """
         from openai import OpenAI
 
         client = OpenAI(**self._client_kwargs)
@@ -220,6 +248,20 @@ class ContentAnalyzer:
 # ---------------------------------------------------------------------------
 
 def _parse_json(raw: str) -> dict[str, Any]:
+    """Parse and validate the LLM's JSON response into an analysis dict.
+
+    Strips optional markdown code fences, extracts the JSON object, and
+    fills in default values for any missing fields.
+
+    Args:
+        raw: Raw LLM response text, expected to contain a JSON object.
+
+    Returns:
+        A complete analysis dict with all expected keys guaranteed to be present.
+
+    Raises:
+        json.JSONDecodeError: If no valid JSON object can be extracted.
+    """
     text = raw.strip()
 
     fence = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", text)
@@ -243,11 +285,23 @@ def _parse_json(raw: str) -> dict[str, Any]:
 
 
 def _apply(doc: Document, analysis: dict[str, Any]) -> Document:
-    """Return a new Document with original content preserved and prefix prepended."""
+    """Build an enriched Document from a chunk and its analysis result.
+
+    Prepends the contextual prefix to the embedded text, preserves the original
+    chunk text in ``meta["original_content"]``, and merges all analysis fields
+    into the document metadata.
+
+    Args:
+        doc:      The source chunk document.
+        analysis: Parsed analysis dict from ``_parse_json``.
+
+    Returns:
+        A new Document with updated content and enriched metadata.
+    """
     original_content = doc.content or ""
     prefix           = analysis.get("context_prefix", "").strip()
 
-    # Contextual prefix: prepended to the embedded text (Anthropic approach)
+    # Contextual prefix prepended to the embedded text to improve retrieval on short/ambiguous chunks
     embedded_content = f"{prefix}\n\n{original_content}" if prefix else original_content
 
     meta = dict(doc.meta)

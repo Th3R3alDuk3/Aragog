@@ -28,12 +28,13 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from config import Settings
 from models.schemas import EvaluationRequest, EvaluationResponse
-from routers._deps import get_retrieval_pipeline
-from routers.query import _retrieve_simple, _run_generation_only
 from pipelines.retrieval import swap_to_parent_content
+from routers._deps import get_generation_pipeline, get_retrieval_pipeline, get_settings
+from services import query as query_service
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +53,10 @@ router = APIRouter(prefix="/evaluation", tags=["evaluation"])
 )
 async def run_evaluation(
     request: EvaluationRequest,
-    req: Request,
     pipeline=Depends(get_retrieval_pipeline),
+    gen_pipeline=Depends(get_generation_pipeline),
+    settings: Settings = Depends(get_settings),
 ) -> EvaluationResponse:
-    settings = req.app.state.settings
-
     if not settings.ragas_enabled:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -80,19 +80,18 @@ async def run_evaluation(
         try:
             # Retrieve
             docs = await asyncio.to_thread(
-                _retrieve_simple,
+                query_service.retrieve_simple,
                 pipeline,
                 sample.question,
-                None,       # no filters for evaluation
-                None,       # no HyDE generator
-                False,      # use_hyde=False
+                None,   # no filters for evaluation
+                None,   # no HyDE generator
+                False,  # use_hyde=False
             )
             docs = swap_to_parent_content(docs)[: request.top_k]
 
             # Generate answer
-            gen_result = await asyncio.to_thread(
-                _run_generation_only,
-                pipeline,
+            gen_result = await query_service.run_generation(
+                gen_pipeline,
                 docs,
                 [sample.question],
                 sample.question,

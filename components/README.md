@@ -1,6 +1,6 @@
 # Components
 
-Custom Haystack components and standalone helper classes used by the indexing and query pipelines.
+Custom Haystack components and standalone helper classes used by the ingestion and retrieval pipelines.
 
 ---
 
@@ -192,9 +192,6 @@ class AnalysisResult:
 **Filter validation:**
 - `classification` is discarded if not in known taxonomy (prevents hallucinated values)
 - Dates must match `YYYY-MM-DD` pattern
-
-`QueryDecomposer = QueryAnalyzer` alias and `decompose()` shim are provided for
-backward compatibility.
 
 See [Theory: Multi-Question Decomposition](#17-theory-multi-question-decomposition).
 

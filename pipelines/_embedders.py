@@ -24,15 +24,19 @@ Works with any OpenAI Chat Completions API-compatible endpoint:
   OpenAI, Ollama, vLLM, LM Studio, Groq, Together AI, …
 """
 
+
+from config import Settings
+from haystack.components.generators import OpenAIGenerator
+from haystack.utils import Secret, ComponentDevice
+from haystack.components.rankers import SentenceTransformersSimilarityRanker
 from haystack.components.embedders import (
     SentenceTransformersDocumentEmbedder,
     SentenceTransformersTextEmbedder,
 )
-from haystack.components.generators import OpenAIGenerator
-from haystack.utils import Secret, ComponentDevice
-from haystack.components.rankers import SentenceTransformersSimilarityRanker
-
-from config import Settings
+from haystack_integrations.components.embedders.fastembed import (
+    FastembedSparseDocumentEmbedder,
+    FastembedSparseTextEmbedder
+)
 
 
 def _onnx_providers(device: str) -> list[str]:
@@ -42,9 +46,9 @@ def _onnx_providers(device: str) -> list[str]:
     FastEmbed (sparse embedders) uses ONNX Runtime instead of PyTorch.
     ONNX providers control whether inference runs on CPU or GPU.
 
-      "cpu"          → ["CPUExecutionProvider"]
+      "cpu"             → ["CPUExecutionProvider"]
       "cuda" / "cuda:N" → ["CUDAExecutionProvider", "CPUExecutionProvider"]
-      other          → ["CPUExecutionProvider"]   (safe fallback)
+      other             → ["CPUExecutionProvider"] (safe fallback)
     """
     if device.startswith("cuda"):
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
@@ -54,6 +58,7 @@ def _onnx_providers(device: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Dense embedders  (HuggingFace / sentence-transformers, local)
 # ---------------------------------------------------------------------------
+
 
 def build_document_embedder(settings: Settings) -> SentenceTransformersDocumentEmbedder:
     """
@@ -65,7 +70,7 @@ def build_document_embedder(settings: Settings) -> SentenceTransformersDocumentE
     return SentenceTransformersDocumentEmbedder(
         model=settings.embedding_model,
         meta_fields_to_embed=["section_title", "context_prefix"],
-        normalize_embeddings=True,      # required for cosine similarity
+        normalize_embeddings=True,
         device=ComponentDevice.from_str(settings.embedding_device),
     )
 
@@ -83,6 +88,7 @@ def build_text_embedder(settings: Settings) -> SentenceTransformersTextEmbedder:
 # Sparse embedders  (SPLADE / BM42 via FastEmbed, local ONNX)
 # ---------------------------------------------------------------------------
 
+
 def build_sparse_document_embedder(settings: Settings):
     """
     Sparse document embedder for the indexing pipeline.
@@ -91,9 +97,6 @@ def build_sparse_document_embedder(settings: Settings):
     vectors in the same collection.  True hybrid retrieval without a
     separate search engine.
     """
-    from haystack_integrations.components.embedders.fastembed import (
-        FastembedSparseDocumentEmbedder,
-    )
     return FastembedSparseDocumentEmbedder(
         model=settings.sparse_embedding_model,
         model_kwargs={"providers": _onnx_providers(settings.sparse_embedding_device)},
@@ -102,9 +105,6 @@ def build_sparse_document_embedder(settings: Settings):
 
 def build_sparse_text_embedder(settings: Settings):
     """Sparse text embedder for the query pipeline."""
-    from haystack_integrations.components.embedders.fastembed import (
-        FastembedSparseTextEmbedder,
-    )
     return FastembedSparseTextEmbedder(
         model=settings.sparse_embedding_model,
         model_kwargs={"providers": _onnx_providers(settings.sparse_embedding_device)},
@@ -114,6 +114,7 @@ def build_sparse_text_embedder(settings: Settings):
 # ---------------------------------------------------------------------------
 # Reranker  (HuggingFace cross-encoder, local)
 # ---------------------------------------------------------------------------
+
 
 def build_reranker(settings: Settings) -> SentenceTransformersSimilarityRanker:
     """

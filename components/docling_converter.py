@@ -95,6 +95,7 @@ class DoclingConverter:
     # ------------------------------------------------------------------
 
     def _get_client(self) -> Client:
+        """Return the shared Gradio client, creating it lazily on first access."""
         if self._client is None:
             self._client = Client(
                 self.docling_url,
@@ -106,12 +107,17 @@ class DoclingConverter:
 
     @component.output_types(documents=list[Document])
     def run(self, paths: list[str]) -> dict[str, list[Document]]:
-        """
-        Convert each file path to a Haystack Document containing markdown.
+        """Convert each file path to a Haystack Document containing markdown.
 
-        Files that fail conversion are skipped with a warning log.
-        The pipeline never aborts due to a single failed file
-        (unless ``abort_on_error=True``).
+        Failed files are skipped with a warning; the pipeline continues unless
+        ``abort_on_error=True`` was set at construction time.
+
+        Args:
+            paths: Absolute paths to the files to convert.
+
+        Returns:
+            A dict with key ``"documents"`` containing one Document per
+            successfully converted file.
         """
         documents: list[Document] = []
 
@@ -136,7 +142,15 @@ class DoclingConverter:
     # ------------------------------------------------------------------
 
     def _convert_file(self, path: str) -> Document | None:
-        """Submit one file, wait for completion, return a Document or None."""
+        """Submit one file to docling-serve and block until conversion is done.
+
+        Args:
+            path: Absolute path to the file to convert.
+
+        Returns:
+            A Document with the markdown content, or ``None`` if the conversion
+            produced no usable output.
+        """
         client = self._get_client()
         filename = os.path.basename(path)
 

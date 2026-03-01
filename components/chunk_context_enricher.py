@@ -41,6 +41,18 @@ class ChunkContextEnricher:
 
     @component.output_types(documents=list[Document])
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
+        """Annotate each chunk with its position and structural context metadata.
+
+        Chunks are grouped by their parent document (``doc_id``) to compute
+        per-document counters, then re-sorted to preserve pipeline order.
+
+        Args:
+            documents: Chunks from ParentChildSplitter, grouped by source document.
+
+        Returns:
+            A dict with key ``"documents"`` containing the annotated chunks in
+            their original order.
+        """
         # Group chunks by parent doc_id (set by MetadataEnricher)
         groups: dict[str, list[Document]] = defaultdict(list)
         for doc in documents:
@@ -68,6 +80,16 @@ class ChunkContextEnricher:
 # ---------------------------------------------------------------------------
 
 def _enrich_group(doc_id: str, chunks: list[Document]) -> list[Document]:
+    """Annotate all chunks belonging to one source document.
+
+    Args:
+        doc_id: Identifier of the parent document (used only for logging).
+        chunks: All chunks that originate from this document, in order.
+
+    Returns:
+        The same chunks with ``chunk_index``, ``chunk_total``, ``section_title``,
+        ``section_path``, and ``chunk_type`` added to their metadata.
+    """
     total = len(chunks)
 
     result: list[Document] = []

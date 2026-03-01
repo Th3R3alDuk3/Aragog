@@ -1,8 +1,8 @@
 """
 Indexing pipeline (Haystack 2.x + Qdrant)
 
-Full pipeline flow — Anthropic Contextual Retrieval Option A
-────────────────────────────────────────────────────────────
+Full pipeline flow — Anthropic Contextual Retrieval
+────────────────────────────────────────────────────
 
   DoclingConverter          Convert PDF/DOCX/… → markdown via docling-serve (Gradio API)
         │
@@ -63,7 +63,9 @@ from pipelines._embedders import (
 )
 
 
-def build_document_store(settings: Settings) -> QdrantDocumentStore:
+def build_document_store(
+        settings: Settings,
+) -> QdrantDocumentStore:
     """
     Create and return the QdrantDocumentStore.
 
@@ -73,7 +75,7 @@ def build_document_store(settings: Settings) -> QdrantDocumentStore:
     """
     return QdrantDocumentStore(
         url=settings.qdrant_url,
-        api_key=Secret.from_token(settings.qdrant_api_key) if settings.qdrant_api_key else None,
+        api_key=Secret.from_token(settings.qdrant_api_key),
         index=settings.qdrant_collection,
         embedding_dim=settings.embedding_dimension,
         use_sparse_embeddings=True,
@@ -82,7 +84,10 @@ def build_document_store(settings: Settings) -> QdrantDocumentStore:
     )
 
 
-def build_indexing_pipeline(settings: Settings) -> tuple[Pipeline, QdrantDocumentStore]:
+def build_indexing_pipeline(
+        settings: Settings,
+) -> tuple[Pipeline, QdrantDocumentStore]:
+
     document_store = build_document_store(settings)
 
     # --- Stage 1: conversion ---
@@ -90,8 +95,8 @@ def build_indexing_pipeline(settings: Settings) -> tuple[Pipeline, QdrantDocumen
 
     # --- Stage 2: document-level metadata ---
     meta_enricher = MetadataEnricher(
-        embedding_model=settings.embedding_model,
         embedding_provider="huggingface",
+        embedding_model=settings.embedding_model,
         embedding_dimension=settings.embedding_dimension,
         doc_beginning_chars=settings.doc_beginning_chars,
     )
@@ -104,10 +109,8 @@ def build_indexing_pipeline(settings: Settings) -> tuple[Pipeline, QdrantDocumen
     )
 
     # --- Stage 4: semantic heading-aware split ---
-    # MarkdownHeaderSplitter (built-in) splits at every H1-H6 boundary and
-    # annotates each section with meta["header"] and meta["parent_headers"].
     header_splitter = MarkdownHeaderSplitter(
-        keep_headers=True,       # headers stay in content (needed for context)
+        keep_headers=True,
         skip_empty_documents=True,
     )
 

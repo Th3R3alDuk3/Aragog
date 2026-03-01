@@ -51,6 +51,11 @@ class ColBERTReranker:
         self._model: Any = None   # lazy-loaded on first use
 
     def _load_model(self) -> None:
+        """Load the ColBERT model lazily on first use.
+
+        Raises:
+            RuntimeError: If the ``pylate`` package is not installed.
+        """
         if self._model is None:
             try:
                 from pylate import models
@@ -63,11 +68,18 @@ class ColBERTReranker:
                 ) from exc
 
     def rerank(self, query: str, documents: list) -> list:
-        """
-        Re-score ``documents`` against ``query`` using ColBERT late interaction.
+        """Re-score documents against the query using ColBERT late interaction.
 
-        Returns at most ``self.top_k`` documents sorted by ColBERT score.
-        Falls back to the input order on any error.
+        Falls back to the cross-encoder input order on any error so the endpoint
+        never fails due to a ColBERT issue.
+
+        Args:
+            query:     The user query string.
+            documents: Candidate documents from the upstream cross-encoder reranker.
+
+        Returns:
+            At most ``top_k`` documents sorted by ColBERT MaxSim score, or the
+            input list (truncated to ``top_k``) if reranking fails.
         """
         if not documents:
             return documents
@@ -82,6 +94,15 @@ class ColBERTReranker:
             return documents[: self.top_k]
 
     def _rerank_internal(self, query: str, documents: list) -> list:
+        """Encode query and documents with ColBERT and return top-k by MaxSim score.
+
+        Args:
+            query:     The user query string.
+            documents: Candidate documents to rerank.
+
+        Returns:
+            Top-k documents sorted by descending ColBERT score.
+        """
         from pylate import rank
 
         doc_texts = [doc.content or "" for doc in documents]
