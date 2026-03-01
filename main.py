@@ -128,7 +128,7 @@ app = FastAPI(
     title="Advanced Hybrid RAG API",
     version="0.1.0",
     description=(
-        "Hybrid Retrieval-Augmented Generation service built on FastAPI and Haystack 2.x. "
+        "Hybrid Retrieval-Augmented Generation service built on FastAPI and Haystack. "
         "Documents are indexed into Qdrant using dense (BGE-M3) and sparse (SPLADE) embeddings "
         "with Anthropic Contextual Retrieval chunking (contextual prefix + parent-child). "
         "Queries are answered via hybrid retrieval, cross-encoder reranking, "

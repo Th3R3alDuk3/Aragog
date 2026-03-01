@@ -202,8 +202,7 @@ All factories read from `Settings` (populated from `.env`) and require no argume
 | `SPARSE_RETRIEVER_TOP_K` | `20` | Sparse retriever candidates |
 | `CHILD_CHUNK_SIZE` | `200` | Words per child chunk |
 | `CHILD_CHUNK_OVERLAP` | `20` | Word overlap between child chunks |
-| `ANALYZER_LLM_MODEL` | `gpt-4o-mini` | Model for ingestion LLM calls |
-| `ANALYZER_MAX_WORKERS` | `4` | Parallel ContentAnalyzer threads |
+| `ANALYZER_MAX_WORKERS` | `4` | Parallel ContentAnalyzer threads (uses `LLM_MODEL`) |
 | `RAPTOR_ENABLED` | `false` | Enable RAPTOR summary chunks |
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant server URL |
 | `QDRANT_COLLECTION` | `documents` | Collection name |

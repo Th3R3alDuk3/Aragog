@@ -126,7 +126,7 @@ def build_indexing_pipeline(
     # --- Stage 7: contextual prefix + semantic metadata (one LLM call/chunk) ---
     analyzer = ContentAnalyzer(
         openai_api_key=settings.openai_api_key,
-        llm_model=settings.analyzer_llm_model,
+        llm_model=settings.llm_model,
         openai_base_url=settings.openai_base_url,
         taxonomy=settings.classification_taxonomy,
         max_workers=settings.analyzer_max_workers,
@@ -140,7 +140,7 @@ def build_indexing_pipeline(
         from components.raptor_summarizer import RaptorSummarizer
         raptor = RaptorSummarizer(
             openai_api_key=settings.openai_api_key,
-            llm_model=settings.analyzer_llm_model,
+            llm_model=settings.llm_model,
             openai_base_url=settings.openai_base_url,
             max_workers=settings.analyzer_max_workers,
         )

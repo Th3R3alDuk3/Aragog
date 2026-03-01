@@ -5,8 +5,8 @@ services:
     container_name: qdrant
     restart: unless-stopped
     ports:
-      - "${QDRANT_PORT:-6333}:6333"          # HTTP / REST + Web UI
-      - "${QDRANT_GRPC_PORT:-6334}:6334"     # gRPC (faster for bulk writes)
+      - "6333:6333"   # HTTP / REST + Web UI
+      - "6334:6334"   # gRPC (faster for bulk writes)
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
@@ -18,8 +18,8 @@ services:
     container_name: minio
     restart: unless-stopped
     ports:
-      - "${MINIO_PORT:-9000}:9000"          # S3 API
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"  # Web console
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console
     environment:
       MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
@@ -32,7 +32,7 @@ services:
     container_name: docling
     restart: unless-stopped
     ports:
-      - "${DOCLING_PORT:-5001}:5001"
+      - "5001:5001"
     environment:
       DOCLING_SERVE_ENABLE_UI: "true"
       DOCLING_SERVE_MAX_WORKERS: ${DOCLING_MAX_WORKERS:-4}
