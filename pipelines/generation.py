@@ -20,7 +20,7 @@ from haystack import Pipeline
 from haystack.components.builders import AnswerBuilder, PromptBuilder
 
 from config import Settings
-from pipelines._embedders import build_generator
+from pipelines._factories import build_generator
 
 # ---------------------------------------------------------------------------
 # RAG prompt — multi-question aware

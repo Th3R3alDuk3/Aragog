@@ -10,7 +10,7 @@ Haystack 2.x pipeline definitions for ingestion and retrieval.
 |------|---------|
 | `ingestion.py` | Ingestion pipeline (10 core stages + optional RAPTOR): document conversion → Qdrant write |
 | `retrieval.py` | Query pipeline builders: retrieval DAG (dual retrieval → RRF → reranker) + generation DAG (prompt → LLM → answer) |
-| `_embedders.py` | Factory functions for embedder/reranker/generator components |
+| `_factories.py` | Factory functions for embedder/reranker/generator components |
 
 ---
 
@@ -174,7 +174,7 @@ prompt_text = Environment().from_string(RAG_PROMPT).render(documents=..., questi
 
 ---
 
-## `_embedders.py` — Factory Functions
+## `_factories.py` — Factory Functions
 
 | Function | Returns | Notes |
 |----------|---------|-------|

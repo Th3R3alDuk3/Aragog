@@ -246,7 +246,7 @@ RAG/
 ├── pipelines/
 │   ├── ingestion_pipeline.py   ← full ingestion DAG
 │   ├── retrieval_pipeline.py   ← retrieval + generation DAG builders + shared RAG prompt
-│   └── _embedders.py           ← HF dense, SPLADE sparse, reranker, LLM
+│   └── _factories.py           ← HF dense, SPLADE sparse, reranker, LLM
 └── routers/
     ├── documents.py            ← POST /documents/index
     ├── query.py                ← POST /query (multi-question aware)

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from logging import INFO, basicConfig, getLogger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_offline import FastAPIOffline as FastAPI
-from components.minio_store import MinioStore
+from services.minio_store import MinioStore
 from components.query_analyzer import QueryAnalyzer
 from services.tasks import BoundedTaskStore
 from config import get_settings

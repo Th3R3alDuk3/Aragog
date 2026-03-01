@@ -57,7 +57,7 @@ from components.docling_converter import DoclingConverter
 from components.metadata_enricher import MetadataEnricher
 from components.parent_child_splitter import ParentChildSplitter
 from config import Settings
-from pipelines._embedders import (
+from pipelines._factories import (
     build_document_embedder,
     build_sparse_document_embedder,
 )

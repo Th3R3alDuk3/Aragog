@@ -42,7 +42,7 @@ from haystack_integrations.components.retrievers.qdrant import (
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from config import Settings
-from pipelines._embedders import (
+from pipelines._factories import (
     build_reranker,
     build_sparse_text_embedder,
     build_text_embedder,
