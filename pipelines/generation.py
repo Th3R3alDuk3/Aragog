@@ -16,7 +16,7 @@ Pipeline flow
     AnswerBuilder
 """
 
-from haystack import Pipeline
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack.components.builders import AnswerBuilder, PromptBuilder
 
 from config import Settings
@@ -57,7 +57,7 @@ Section : {{ doc.meta.get("section_title", "") }}
 Answer:"""
 
 
-def build_generation_pipeline(settings: Settings) -> Pipeline:
+def build_generation_pipeline(settings: Settings) -> AsyncPipeline:
     """Build the LLM generation pipeline.
 
     The pipeline accepts ``documents`` and ``questions`` as runtime inputs and
@@ -67,7 +67,7 @@ def build_generation_pipeline(settings: Settings) -> Pipeline:
         settings: Application settings used to configure the LLM generator.
 
     Returns:
-        A Haystack ``Pipeline`` with components ``prompt_builder``, ``llm``,
+        A Haystack ``AsyncPipeline`` with components ``prompt_builder``, ``llm``,
         and ``answer_builder`` wired in sequence.
     """
     prompt_builder = PromptBuilder(
@@ -77,7 +77,7 @@ def build_generation_pipeline(settings: Settings) -> Pipeline:
     generator      = build_generator(settings)
     answer_builder = AnswerBuilder()
 
-    generation = Pipeline()
+    generation = AsyncPipeline()
     generation.add_component("prompt_builder", prompt_builder)
     generation.add_component("llm",            generator)
     generation.add_component("answer_builder", answer_builder)

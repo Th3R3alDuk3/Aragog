@@ -109,9 +109,9 @@ class ContentAnalyzer:
     Combined contextual-prefix generator + semantic metadata extractor.
 
     Args:
+        openai_url:      Custom base URL (empty = official OpenAI API).
         openai_api_key:  API key for the LLM endpoint.
         llm_model:       Model name (any OpenAI-compatible model).
-        openai_base_url: Custom base URL (empty = official OpenAI API).
         taxonomy:        Comma-separated classification labels.
         max_workers:     Thread-pool size for parallel chunk processing.
         max_chars:       Max chunk characters sent to LLM (longer → truncated).
@@ -120,9 +120,9 @@ class ContentAnalyzer:
 
     def __init__(
         self,
+        openai_url: str,
         openai_api_key: str,
         llm_model: str,
-        openai_base_url: str = "",
         taxonomy: str = (
             "financial,legal,technical,scientific,hr,"
             "marketing,contract,report,manual,correspondence,general"
@@ -133,7 +133,7 @@ class ContentAnalyzer:
     ) -> None:
         self.openai_api_key      = openai_api_key
         self.llm_model           = llm_model
-        self.openai_base_url     = openai_base_url or None
+        self.openai_url     = openai_url or None
         self.taxonomy            = taxonomy
         self.max_workers         = max_workers
         self.max_chars           = max_chars
@@ -143,8 +143,8 @@ class ContentAnalyzer:
         self._client_kwargs: dict[str, Any] = {
             "api_key": openai_api_key,
         }
-        if self.openai_base_url:
-            self._client_kwargs["base_url"] = self.openai_base_url
+        if self.openai_url:
+            self._client_kwargs["base_url"] = self.openai_url
 
     @component.output_types(documents=list[Document])
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:

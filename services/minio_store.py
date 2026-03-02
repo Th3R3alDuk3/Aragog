@@ -15,11 +15,13 @@ Configuration (via .env):
   MINIO_SECURE     — false for HTTP (local), true for HTTPS (production)
 """
 
-import logging
+from logging import getLogger
+from minio import Minio
 from pathlib import Path
 from urllib.parse import quote
 
-logger = logging.getLogger(__name__)
+
+logger = getLogger(__name__)
 
 
 class MinioStore:
@@ -42,7 +44,6 @@ class MinioStore:
         bucket: str,
         secure: bool = False,
     ) -> None:
-        from minio import Minio
 
         self._client = Minio(
             endpoint,
@@ -50,9 +51,11 @@ class MinioStore:
             secret_key=secret_key,
             secure=secure,
         )
+
         self._bucket = bucket
         self._scheme = "https" if secure else "http"
         self._endpoint = endpoint
+        
         self._ensure_bucket()
 
     def _ensure_bucket(self) -> None:

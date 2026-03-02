@@ -63,18 +63,18 @@ class HyDEGenerator:
     Args:
         openai_api_key:  API key for the LLM endpoint.
         llm_model:       OpenAI-compatible model name.
-        openai_base_url: Custom base URL (empty = official OpenAI API).
+        openai_url: Custom base URL (empty = official OpenAI API).
     """
 
     def __init__(
         self,
-        openai_base_url: str,
+        openai_url: str,
         openai_api_key: str,
         llm_model: str,
     ) -> None:
         client_kwargs: dict[str, Any] = {"api_key": openai_api_key}
-        if openai_base_url:
-            client_kwargs["base_url"] = openai_base_url
+        if openai_url:
+            client_kwargs["base_url"] = openai_url
         self._client    = OpenAI(**client_kwargs)
         self._llm_model = llm_model
 

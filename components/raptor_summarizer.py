@@ -88,7 +88,7 @@ class RaptorSummarizer:
     Args:
         openai_api_key:  API key for the LLM endpoint.
         llm_model:       OpenAI-compatible model name (use the cheap analyzer model).
-        openai_base_url: Custom base URL.
+        openai_url: Custom base URL.
         max_workers:     Parallel LLM calls for section summarisation.
     """
 
@@ -96,12 +96,12 @@ class RaptorSummarizer:
         self,
         openai_api_key: str,
         llm_model: str,
-        openai_base_url: str = "",
+        openai_url: str = "",
         max_workers: int = 4,
     ) -> None:
         self._api_key      = openai_api_key
         self._llm_model    = llm_model
-        self._base_url     = openai_base_url or None
+        self._base_url     = openai_url or None
         self._max_workers  = max_workers
 
     # ------------------------------------------------------------------

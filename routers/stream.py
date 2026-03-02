@@ -16,14 +16,23 @@ import logging
 from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from jinja2 import Environment
 from sse_starlette.sse import EventSourceResponse
 
+from components.colbert_reranker import ColBERTReranker
+from components.hyde_generator import HyDEGenerator
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
 from models.schemas import QueryRequest
 from pipelines.generation import RAG_PROMPT
-from routers._deps import get_colbert_reranker, get_hyde_generator, get_query_analyzer, get_retrieval_pipeline, get_settings
+from routers._deps import (
+    get_colbert_reranker,
+    get_hyde_generator,
+    get_query_analyzer,
+    get_retrieval_pipeline,
+    get_settings,
+)
 from services import query as query_service
 
 logger = logging.getLogger(__name__)
@@ -42,10 +51,10 @@ router = APIRouter(prefix="/query", tags=["query"])
 )
 async def query_stream(
     request: QueryRequest,
-    pipeline=Depends(get_retrieval_pipeline),
+    pipeline: AsyncPipeline = Depends(get_retrieval_pipeline),
     analyzer: QueryAnalyzer = Depends(get_query_analyzer),
-    hyde_generator=Depends(get_hyde_generator),
-    colbert_reranker=Depends(get_colbert_reranker),
+    hyde_generator: HyDEGenerator | None = Depends(get_hyde_generator),
+    colbert_reranker: ColBERTReranker | None = Depends(get_colbert_reranker),
     settings: Settings = Depends(get_settings),
 ) -> EventSourceResponse:
     try:
@@ -89,8 +98,8 @@ async def _stream_generator(
         from openai import AsyncOpenAI
 
         client_kwargs: dict[str, Any] = {"api_key": settings.openai_api_key}
-        if settings.openai_base_url:
-            client_kwargs["base_url"] = settings.openai_base_url
+        if settings.openai_url:
+            client_kwargs["base_url"] = settings.openai_url
 
         client = AsyncOpenAI(**client_kwargs)
         stream  = await client.chat.completions.create(

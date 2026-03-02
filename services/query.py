@@ -160,8 +160,8 @@ def _reformulate_query(query: str, settings: Settings) -> str:
     try:
         from openai import OpenAI
         client_kwargs: dict[str, Any] = {"api_key": settings.openai_api_key}
-        if settings.openai_base_url:
-            client_kwargs["base_url"] = settings.openai_base_url
+        if settings.openai_url:
+            client_kwargs["base_url"] = settings.openai_url
         client = OpenAI(**client_kwargs)
         response = client.chat.completions.create(
             model    = settings.llm_model,
@@ -313,7 +313,7 @@ async def retrieve_with_crag(
     Retrieval with CRAG retry loop.
     Returns (reranked_docs, low_confidence).
     """
-    docs      = await asyncio.to_thread(retrieve_simple, pipeline, sub_q, filters, hyde_generator, use_hyde)
+    docs      = await retrieve(pipeline, sub_q, filters, hyde_generator, use_hyde)
     top_score = (getattr(docs[0], "score", None) or 0.0) if docs else 0.0
     sufficient = top_score >= settings.crag_score_threshold
 
@@ -346,19 +346,52 @@ def format_source_docs(docs: list[Document]) -> list[SourceDocument]:
     ]
 
 
+async def retrieve(
+    pipeline,
+    sub_q: str,
+    filters: dict | None,
+    hyde_generator,
+    use_hyde: bool,
+) -> list:
+    """Run the hybrid retrieval pipeline asynchronously."""
+    if use_hyde and hyde_generator is not None:
+        dense_text = await asyncio.to_thread(hyde_generator.generate, sub_q)
+        logger.info("  HyDE: hypothetical doc generated (%d chars)", len(dense_text))
+    else:
+        dense_text = sub_q
+
+    run_input: dict = {
+        "dense_embedder":  {"text": dense_text},
+        "sparse_embedder": {"text": sub_q},
+        "reranker":        {"query": sub_q},
+    }
+    if filters:
+        run_input["dense_retriever"]  = {"filters": filters}
+        run_input["sparse_retriever"] = {"filters": filters}
+
+    result    = await pipeline.run_async(run_input)
+    docs      = result.get("reranker", {}).get("documents", [])
+    top_score = getattr(docs[0], "score", None) if docs else None
+    logger.info(
+        "  → %d doc(s) after reranking%s",
+        len(docs),
+        f" | top_score={top_score:.3f}" if top_score is not None else "",
+    )
+    return docs
+
+
 async def run_generation(
-    gen_pipeline,
+    pipeline,
     documents: list[Document],
     questions: list[str],
     query: str,
 ) -> dict:
-    """Run prompt_builder → llm → answer_builder (offloaded to thread pool)."""
-    return await asyncio.to_thread(
-        gen_pipeline.run,
+    """Run prompt_builder → llm → answer_builder (async pipeline)."""
+    return await pipeline.run_async(
         {
             "prompt_builder": {"documents": documents, "questions": questions},
             "answer_builder": {"query": query, "documents": documents},
-        },
+        }
     )
 
 
@@ -409,9 +442,7 @@ async def prepare_context(
                 )
                 low_confidence = low_confidence or lc
             else:
-                docs = await asyncio.to_thread(
-                    retrieve_simple, pipeline, sub_q, filters, hyde_generator, use_hyde,
-                )
+                docs = await retrieve(pipeline, sub_q, filters, hyde_generator, use_hyde)
         except Exception as exc:
             raise RetrievalError(f"Retrieval failed for '{sub_q}': {exc}") from exc
 

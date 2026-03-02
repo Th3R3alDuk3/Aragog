@@ -33,7 +33,8 @@ meta["parent_content"] (full markdown section) before the LLM
 generates its answer — broader context without sacrificing retrieval precision.
 """
 
-from haystack import Document, Pipeline
+from haystack import Document
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack.components.joiners import DocumentJoiner
 from haystack_integrations.components.retrievers.qdrant import (
     QdrantEmbeddingRetriever,
@@ -52,7 +53,7 @@ from pipelines._factories import (
 def build_retrieval_pipeline(
     settings: Settings,
     document_store: QdrantDocumentStore,
-) -> Pipeline:
+) -> AsyncPipeline:
     """Build the hybrid retrieval pipeline.
 
     Combines dense and sparse retrievers via Reciprocal Rank Fusion, followed
@@ -66,7 +67,7 @@ def build_retrieval_pipeline(
                         ingestion pipeline builder).
 
     Returns:
-        A Haystack ``Pipeline`` with components ``dense_embedder``,
+        A Haystack ``AsyncPipeline`` with components ``dense_embedder``,
         ``sparse_embedder``, ``dense_retriever``, ``sparse_retriever``,
         ``joiner``, and ``reranker`` wired in sequence.
     """
@@ -86,7 +87,7 @@ def build_retrieval_pipeline(
     )
     reranker = build_reranker(settings)
 
-    retrieval = Pipeline()
+    retrieval = AsyncPipeline()
     retrieval.add_component("dense_embedder",   dense_embedder)
     retrieval.add_component("sparse_embedder",  sparse_embedder)
     retrieval.add_component("dense_retriever",  dense_retriever)

@@ -142,7 +142,7 @@ def build_generator(settings: Settings) -> OpenAIGenerator:
     """
     OpenAI-compatible text generator.
 
-    Set ``OPENAI_BASE_URL`` in .env to use a different backend:
+    Set ``OPENAI_URL`` in .env to use a different backend:
       Ollama  → http://localhost:11434/v1
       vLLM    → http://localhost:8000/v1
       Groq    → https://api.groq.com/openai/v1
@@ -151,6 +151,6 @@ def build_generator(settings: Settings) -> OpenAIGenerator:
         "api_key": Secret.from_token(settings.openai_api_key),
         "model":   settings.llm_model,
     }
-    if settings.openai_base_url:
-        kwargs["api_base_url"] = settings.openai_base_url
+    if settings.openai_url:
+        kwargs["api_base_url"] = settings.openai_url
     return OpenAIGenerator(**kwargs)

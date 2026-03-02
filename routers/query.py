@@ -1,7 +1,10 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 
+from components.colbert_reranker import ColBERTReranker
+from components.hyde_generator import HyDEGenerator
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
 from models.schemas import QueryRequest, QueryResponse
@@ -34,11 +37,11 @@ router = APIRouter(prefix="/query", tags=["query"])
 )
 async def query_rag(
     request: QueryRequest,
-    pipeline=Depends(get_retrieval_pipeline),
-    gen_pipeline=Depends(get_generation_pipeline),
+    pipeline: AsyncPipeline = Depends(get_retrieval_pipeline),
+    gen_pipeline: AsyncPipeline = Depends(get_generation_pipeline),
     analyzer: QueryAnalyzer = Depends(get_query_analyzer),
-    hyde_generator=Depends(get_hyde_generator),
-    colbert_reranker=Depends(get_colbert_reranker),
+    hyde_generator: HyDEGenerator | None = Depends(get_hyde_generator),
+    colbert_reranker: ColBERTReranker | None = Depends(get_colbert_reranker),
     settings: Settings = Depends(get_settings),
 ) -> QueryResponse:
     logger.info("── QUERY ─────────────────────────────────────────────────────")

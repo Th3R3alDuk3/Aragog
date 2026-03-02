@@ -21,8 +21,8 @@ services:
       - "9000:9000"   # S3 API
       - "9001:9001"   # Web console
     environment:
-      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -35,7 +35,7 @@ services:
       - "5001:5001"
     environment:
       DOCLING_SERVE_ENABLE_UI: "true"
-      DOCLING_SERVE_MAX_WORKERS: ${DOCLING_MAX_WORKERS:-4}
+      DOCLING_SERVE_MAX_WORKERS: ${DOCLING_MAX_WORKERS:-3}
     # deploy:
     #   resources:
     #     reservations:

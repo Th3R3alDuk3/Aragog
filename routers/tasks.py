@@ -19,7 +19,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 )
 async def get_task(
     task_id: str,
-    task_store: dict = Depends(get_task_store),
+    task_store: dict[str, TaskState] = Depends(get_task_store),
 ) -> TaskState:
     task = task_store.get(task_id)
     if task is None:

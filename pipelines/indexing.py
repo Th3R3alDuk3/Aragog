@@ -44,11 +44,11 @@ Full pipeline flow — Anthropic Contextual Retrieval
 See models/README.md for the full metadata specification.
 """
 
-from haystack import Pipeline
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
+from haystack.utils import Secret
 from haystack.components.preprocessors import DocumentCleaner, MarkdownHeaderSplitter
 from haystack.components.writers import DocumentWriter
 from haystack.document_stores.types import DuplicatePolicy
-from haystack.utils import Secret
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from components.chunk_context_enricher import ChunkContextEnricher
@@ -86,7 +86,7 @@ def build_document_store(
 
 def build_indexing_pipeline(
         settings: Settings,
-) -> tuple[Pipeline, QdrantDocumentStore]:
+) -> tuple[AsyncPipeline, QdrantDocumentStore]:
 
     document_store = build_document_store(settings)
 
@@ -127,7 +127,7 @@ def build_indexing_pipeline(
     analyzer = ContentAnalyzer(
         openai_api_key=settings.openai_api_key,
         llm_model=settings.llm_model,
-        openai_base_url=settings.openai_base_url,
+        openai_url=settings.openai_url,
         taxonomy=settings.classification_taxonomy,
         max_workers=settings.analyzer_max_workers,
         max_chars=settings.analyzer_max_chars,
@@ -141,7 +141,7 @@ def build_indexing_pipeline(
         raptor = RaptorSummarizer(
             openai_api_key=settings.openai_api_key,
             llm_model=settings.llm_model,
-            openai_base_url=settings.openai_base_url,
+            openai_url=settings.openai_url,
             max_workers=settings.analyzer_max_workers,
         )
 
@@ -157,7 +157,7 @@ def build_indexing_pipeline(
         policy=DuplicatePolicy.OVERWRITE,
     )
 
-    pipeline = Pipeline()
+    pipeline = AsyncPipeline()
     pipeline.add_component("converter",             converter)
     pipeline.add_component("meta_enricher",         meta_enricher)
     pipeline.add_component("cleaner",               cleaner)

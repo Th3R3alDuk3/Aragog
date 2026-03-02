@@ -128,7 +128,7 @@ class QueryAnalyzer:
     Detects compound queries AND extracts metadata filter hints in one LLM call.
 
     Args:
-        openai_base_url: Custom base URL (empty = official OpenAI API).
+        openai_url: Custom base URL (empty = official OpenAI API).
         openai_api_key:  API key for the LLM endpoint.
         llm_model:       OpenAI-compatible model name.
         taxonomy:        Comma-separated classification labels.
@@ -136,7 +136,7 @@ class QueryAnalyzer:
 
     def __init__(
         self,
-        openai_base_url: str,
+        openai_url: str,
         openai_api_key: str,
         llm_model: str,
         taxonomy: str = (
@@ -146,7 +146,7 @@ class QueryAnalyzer:
     ) -> None:
         
         self._client = OpenAI(
-            base_url = openai_base_url,
+            base_url = openai_url,
             api_key  = openai_api_key,
         )
 

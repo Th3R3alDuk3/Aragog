@@ -187,7 +187,7 @@ curl -X POST http://localhost:8000/query \
 
 The system works with any **OpenAI-compatible** endpoint:
 
-| Backend | `OPENAI_BASE_URL` | `OPENAI_API_KEY` | `LLM_MODEL` |
+| Backend | `OPENAI_URL` | `OPENAI_API_KEY` | `LLM_MODEL` |
 |---------|-------------------|-----------------|-------------|
 | OpenAI | *(empty)* | `sk-…` | `gpt-4o-mini` |
 | Ollama (local) | `http://localhost:11434/v1` | `ollama` | `llama3.2` |

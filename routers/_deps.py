@@ -5,9 +5,11 @@ them into route handlers via FastAPI's Depends() mechanism.
 """
 
 from asyncio import Semaphore
+
 from fastapi import Request
-from haystack import Pipeline
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
 
@@ -16,20 +18,29 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
+# --- Infrastructure ---
+
+
 def get_document_store(request: Request) -> QdrantDocumentStore:
     return request.app.state.document_store
 
 
-def get_indexing_pipeline(request: Request) -> Pipeline:
+def get_minio_store(request: Request):
+    return request.app.state.minio_store
+
+
+# --- Indexing ---
+
+
+def get_indexing_pipeline(request: Request) -> AsyncPipeline:
     return request.app.state.indexing_pipeline
 
 
-def get_retrieval_pipeline(request: Request) -> Pipeline:
-    return request.app.state.retrieval_pipeline
+def get_indexing_semaphore(request: Request) -> Semaphore:
+    return request.app.state.indexing_semaphore
 
 
-def get_generation_pipeline(request: Request) -> Pipeline:
-    return request.app.state.generation_pipeline
+# --- Retrieval ---
 
 
 def get_query_analyzer(request: Request) -> QueryAnalyzer:
@@ -41,18 +52,24 @@ def get_hyde_generator(request: Request):
     return request.app.state.hyde_generator
 
 
+def get_retrieval_pipeline(request: Request) -> AsyncPipeline:
+    return request.app.state.retrieval_pipeline
+
+
 def get_colbert_reranker(request: Request):
     """None if COLBERT_ENABLED=false."""
     return request.app.state.colbert_reranker
 
 
-def get_minio_store(request: Request):
-    return request.app.state.minio_store
+# --- Generation ---
+
+
+def get_generation_pipeline(request: Request) -> AsyncPipeline:
+    return request.app.state.generation_pipeline
+
+
+# --- Application ---
 
 
 def get_task_store(request: Request) -> dict:
     return request.app.state.tasks
-
-
-def get_indexing_semaphore(request: Request) -> Semaphore:
-    return request.app.state.indexing_semaphore

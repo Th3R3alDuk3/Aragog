@@ -15,10 +15,11 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from haystack import Pipeline
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from models.schemas import IndexResponse, TaskState
+from services.minio_store import MinioStore
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def _advance(task: TaskState, step: str) -> None:
     task.updated_at = datetime.now(timezone.utc)
 
 
-def _run_component(pipeline: Pipeline, task: TaskState, step: str, component_name: str, **kwargs):
+def _run_component(pipeline: AsyncPipeline, task: TaskState, step: str, component_name: str, **kwargs):
     """Advance task step, warm up component if needed, then run it."""
     _advance(task, step)
     comp = pipeline.get_component(component_name)
@@ -43,7 +44,7 @@ def _run_component(pipeline: Pipeline, task: TaskState, step: str, component_nam
 
 def _sync_index(
     task: TaskState,
-    pipeline: Pipeline,
+    pipeline: AsyncPipeline,
     document_store: QdrantDocumentStore,
     minio_store,
     file_bytes: bytes,
@@ -186,16 +187,16 @@ def _sync_index(
 
 async def run_indexing(
     task: TaskState,
-    pipeline: Pipeline,
     document_store: QdrantDocumentStore,
-    minio_store,
+    minio_store: MinioStore,
+    pipeline: AsyncPipeline,
+    file_name: str,
     file_bytes: bytes,
-    original_name: str,
 ) -> None:
     """Async entry point — offloads synchronous indexing to a thread-pool executor."""
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(
         None,
         _sync_index,
-        task, pipeline, document_store, minio_store, file_bytes, original_name,
+        task, pipeline, document_store, minio_store, file_bytes, file_name,
     )
