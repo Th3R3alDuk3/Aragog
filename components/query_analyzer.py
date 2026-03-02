@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 # ---------------------------------------------------------------------------
 # Heuristic pre-filters (avoid LLM call for simple, clearly single queries)
@@ -145,7 +145,7 @@ class QueryAnalyzer:
         ),
     ) -> None:
         
-        self._client = OpenAI(
+        self._client = AsyncOpenAI(
             base_url = openai_url,
             api_key  = openai_api_key,
         )
@@ -154,7 +154,7 @@ class QueryAnalyzer:
         self._taxonomy  = set(t.strip() for t in taxonomy.split(",") if t.strip())
         self._taxonomy_str = taxonomy
 
-    def analyze(self, query: str) -> AnalysisResult:
+    async def analyze(self, query: str) -> AnalysisResult:
         """Decompose a query into sub-questions and extract metadata filter hints.
 
         Short queries with no compound or filter signals bypass the LLM entirely
@@ -173,11 +173,11 @@ class QueryAnalyzer:
         if len(words) <= 10 and not _COMPOUND_HINTS.search(query) and not _FILTER_HINTS.search(query):
             return AnalysisResult(sub_questions=[query], is_compound=False)
 
-        return self._llm_analyze(query)
+        return await self._llm_analyze(query)
 
     # ------------------------------------------------------------------
 
-    def _llm_analyze(self, query: str) -> AnalysisResult:
+    async def _llm_analyze(self, query: str) -> AnalysisResult:
         """Send the query to the LLM for analysis and parse the response.
 
         Falls back to a trivial single-question result on any LLM or parse error
@@ -190,7 +190,7 @@ class QueryAnalyzer:
             A parsed ``AnalysisResult``, or a fallback with ``[query]`` on error.
         """
         try:
-            response = self._client.chat.completions.create(
+            response = await self._client.chat.completions.create(
                 model    = self._llm_model,
                 messages = [
                     {"role": "system", "content": _SYSTEM},

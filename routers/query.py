@@ -1,4 +1,4 @@
-import logging
+from logging import getLogger
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
@@ -18,7 +18,8 @@ from routers._deps import (
 )
 from services import query as query_service
 
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
+
 
 router = APIRouter(prefix="/query", tags=["query"])
 
@@ -37,24 +38,36 @@ router = APIRouter(prefix="/query", tags=["query"])
 )
 async def query_rag(
     request: QueryRequest,
-    pipeline: AsyncPipeline = Depends(get_retrieval_pipeline),
-    gen_pipeline: AsyncPipeline = Depends(get_generation_pipeline),
-    analyzer: QueryAnalyzer = Depends(get_query_analyzer),
+    settings: Settings = Depends(get_settings),
+    retrieval_pipeline: AsyncPipeline = Depends(get_retrieval_pipeline),
+    generation_pipeline: AsyncPipeline = Depends(get_generation_pipeline),
+    query_analyzer: QueryAnalyzer = Depends(get_query_analyzer),
     hyde_generator: HyDEGenerator | None = Depends(get_hyde_generator),
     colbert_reranker: ColBERTReranker | None = Depends(get_colbert_reranker),
-    settings: Settings = Depends(get_settings),
 ) -> QueryResponse:
+
     logger.info("── QUERY ─────────────────────────────────────────────────────")
     logger.info("Query: %r", request.query)
 
     try:
         ctx = await query_service.prepare_context(
-            request, settings, pipeline, analyzer, hyde_generator, colbert_reranker,
+            request,
+            settings,
+            retrieval_pipeline,
+            query_analyzer,
+            hyde_generator,
+            colbert_reranker,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except query_service.RetrievalError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid query or filter parameters: {error}",
+        ) from error
+    except query_service.RetrievalError as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document retrieval failed: {error}",
+        ) from error
 
     if not ctx.merged_docs:
         raise HTTPException(
@@ -62,43 +75,50 @@ async def query_rag(
             detail="No relevant documents found for your query.",
         )
 
-    logger.info("Generate → %d doc(s) as context …", len(ctx.merged_docs))
+    logger.info("Generate → %d doc(s) as context...", len(ctx.merged_docs))
+
     try:
-        gen_result = await query_service.run_generation(
-            gen_pipeline, ctx.merged_docs, ctx.sub_questions, request.query,
+        answers = await query_service.run_generation(
+            generation_pipeline,
+            ctx.merged_docs,
+            ctx.sub_questions,
+            request.query,
         )
-    except Exception as exc:
+    except Exception as error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Answer generation failed: {exc}",
-        ) from exc
+            detail=f"Answer generation failed: {error}",
+        ) from error
 
-    answers = gen_result.get("answer_builder", {}).get("answers", [])
     if not answers:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="LLM returned no answer.",
         )
 
-    best    = answers[0]
+    answer = answers[0]
+
     sources = query_service.format_source_docs(
-        (best.documents or ctx.merged_docs)[: request.top_k]
+        (answer.documents or ctx.merged_docs)[: request.top_k]
     )
 
     logger.info(
         "Done  → answer=%d chars | sources=%d%s",
-        len(best.data or ""),
+        len(answer.data or ""),
         len(sources),
         " | low_confidence=true" if ctx.low_confidence else "",
     )
+
     logger.info("──────────────────────────────────────────────────────────────")
 
     return QueryResponse(
-        answer            = best.data or "",
-        sources           = sources,
-        query             = request.query,
-        sub_questions     = ctx.sub_questions if ctx.is_compound else [],
-        is_compound       = ctx.is_compound,
-        low_confidence    = ctx.low_confidence,
-        extracted_filters = query_service.analysis_to_filter_dict(ctx.analysis) if ctx.analysis else None,
+        answer=answer.data or "",
+        sources=sources,
+        query=request.query,
+        sub_questions=ctx.sub_questions if ctx.is_compound else [],
+        is_compound=ctx.is_compound,
+        low_confidence=ctx.low_confidence,
+        extracted_filters=query_service.analysis_to_filter_dict(ctx.analysis)
+        if ctx.analysis
+        else None,
     )

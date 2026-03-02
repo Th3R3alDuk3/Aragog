@@ -63,7 +63,7 @@ async def index_document(
     except OverflowError as error:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(error),
+            detail=f"Task store is full, cannot accept new indexing jobs: {error}",
         )
 
     async def _task():

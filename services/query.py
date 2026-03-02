@@ -4,7 +4,7 @@ Query service — filter building, retrieval orchestration, generation.
 Full query pipeline:
   1. QueryAnalyzer    — decompose + extract metadata filters in one LLM call
   2. build_filters    — merge LLM-extracted hints + explicit request filters
-  3. retrieve_simple / retrieve_with_crag — retrieval with optional HyDE and CRAG
+  3. run_retrieval / retrieve_with_crag — retrieval with optional HyDE and CRAG
   4. swap_to_parent_content — replace child chunks with full parent sections
   5. ColBERT second-pass reranker (optional)
   6. run_generation   — prompt_builder → LLM → answer_builder
@@ -15,13 +15,12 @@ Feature flags (controlled via .env):
   COLBERT_ENABLED — ColBERT late-interaction second-pass reranker
 """
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date as date_type, datetime, time, timezone
 from typing import Any
 
-from haystack.dataclasses import Document
+from haystack.dataclasses import Document, GeneratedAnswer
 
 from components.query_analyzer import AnalysisResult, QueryAnalyzer
 from config import Settings
@@ -155,15 +154,15 @@ def _coerce_request_filters(raw_filters: dict[str, Any] | None) -> dict | None:
     return {"operator": "AND", "conditions": conditions}
 
 
-def _reformulate_query(query: str, settings: Settings) -> str:
+async def _reformulate_query(query: str, settings: Settings) -> str:
     """LLM rephrases query to improve retrieval. Falls back to original on error."""
     try:
-        from openai import OpenAI
+        from openai import AsyncOpenAI
         client_kwargs: dict[str, Any] = {"api_key": settings.openai_api_key}
         if settings.openai_url:
             client_kwargs["base_url"] = settings.openai_url
-        client = OpenAI(**client_kwargs)
-        response = client.chat.completions.create(
+        client = AsyncOpenAI(**client_kwargs)
+        response = await client.chat.completions.create(
             model    = settings.llm_model,
             messages = [{
                 "role": "user",
@@ -266,40 +265,6 @@ def analysis_to_filter_dict(analysis: AnalysisResult) -> dict[str, Any] | None:
     return non_null or None
 
 
-def retrieve_simple(
-    pipeline,
-    sub_q: str,
-    filters: dict | None,
-    hyde_generator,
-    use_hyde: bool,
-) -> list:
-    """Single retrieval pass — returns reranked documents."""
-    if use_hyde and hyde_generator is not None:
-        dense_text = hyde_generator.generate(sub_q)
-        logger.info("  HyDE: hypothetical doc generated (%d chars)", len(dense_text))
-    else:
-        dense_text = sub_q
-
-    run_input: dict = {
-        "dense_embedder":  {"text": dense_text},
-        "sparse_embedder": {"text": sub_q},
-        "reranker":        {"query": sub_q},
-    }
-    if filters:
-        run_input["dense_retriever"]  = {"filters": filters}
-        run_input["sparse_retriever"] = {"filters": filters}
-
-    result    = pipeline.run(run_input)
-    docs      = result.get("reranker", {}).get("documents", [])
-    top_score = getattr(docs[0], "score", None) if docs else None
-    logger.info(
-        "  → %d doc(s) after reranking%s",
-        len(docs),
-        f" | top_score={top_score:.3f}" if top_score is not None else "",
-    )
-    return docs
-
-
 async def retrieve_with_crag(
     pipeline,
     sub_q: str,
@@ -313,7 +278,7 @@ async def retrieve_with_crag(
     Retrieval with CRAG retry loop.
     Returns (reranked_docs, low_confidence).
     """
-    docs      = await retrieve(pipeline, sub_q, filters, hyde_generator, use_hyde)
+    docs      = await run_retrieval(pipeline, sub_q, filters, hyde_generator, use_hyde)
     top_score = (getattr(docs[0], "score", None) or 0.0) if docs else 0.0
     sufficient = top_score >= settings.crag_score_threshold
 
@@ -325,7 +290,7 @@ async def retrieve_with_crag(
             )
         return docs, not sufficient
 
-    reformulated = await asyncio.to_thread(_reformulate_query, sub_q, settings)
+    reformulated = await _reformulate_query(sub_q, settings)
     return await retrieve_with_crag(
         pipeline, reformulated, filters, settings, hyde_generator, use_hyde, attempt + 1,
     )
@@ -346,7 +311,7 @@ def format_source_docs(docs: list[Document]) -> list[SourceDocument]:
     ]
 
 
-async def retrieve(
+async def run_retrieval(
     pipeline,
     sub_q: str,
     filters: dict | None,
@@ -355,7 +320,7 @@ async def retrieve(
 ) -> list:
     """Run the hybrid retrieval pipeline asynchronously."""
     if use_hyde and hyde_generator is not None:
-        dense_text = await asyncio.to_thread(hyde_generator.generate, sub_q)
+        dense_text = await hyde_generator.generate(sub_q)
         logger.info("  HyDE: hypothetical doc generated (%d chars)", len(dense_text))
     else:
         dense_text = sub_q
@@ -385,14 +350,15 @@ async def run_generation(
     documents: list[Document],
     questions: list[str],
     query: str,
-) -> dict:
+) -> list[GeneratedAnswer]:
     """Run prompt_builder → llm → answer_builder (async pipeline)."""
-    return await pipeline.run_async(
+    result = await pipeline.run_async(
         {
             "prompt_builder": {"documents": documents, "questions": questions},
             "answer_builder": {"query": query, "documents": documents},
         }
     )
+    return result.get("answer_builder", {}).get("answers", [])
 
 
 async def prepare_context(
@@ -412,7 +378,7 @@ async def prepare_context(
         RetrievalError   — retrieval failure for a sub-question
     """
     # 1. Analyze: decompose + extract metadata filters
-    analysis      = analyzer.analyze(request.query)
+    analysis      = await analyzer.analyze(request.query)
     sub_questions = analysis.sub_questions
     is_compound   = len(sub_questions) > 1
     logger.info(
@@ -442,7 +408,7 @@ async def prepare_context(
                 )
                 low_confidence = low_confidence or lc
             else:
-                docs = await retrieve(pipeline, sub_q, filters, hyde_generator, use_hyde)
+                docs = await run_retrieval(pipeline, sub_q, filters, hyde_generator, use_hyde)
         except Exception as exc:
             raise RetrievalError(f"Retrieval failed for '{sub_q}': {exc}") from exc
 
