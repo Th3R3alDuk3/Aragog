@@ -333,9 +333,11 @@ async def run_retrieval(
     if filters:
         run_input["dense_retriever"]  = {"filters": filters}
         run_input["sparse_retriever"] = {"filters": filters}
+    if "colbert_reranker" in pipeline.graph.nodes:
+        run_input["colbert_reranker"] = {"query": sub_q}
 
     result    = await pipeline.run_async(run_input)
-    docs      = result.get("reranker", {}).get("documents", [])
+    docs      = (result.get("colbert_reranker") or result.get("reranker", {})).get("documents", [])
     top_score = getattr(docs[0], "score", None) if docs else None
     logger.info(
         "  → %d doc(s) after reranking%s",
@@ -367,11 +369,11 @@ async def prepare_context(
     pipeline,
     analyzer: QueryAnalyzer,
     hyde_generator,
-    colbert_reranker,
 ) -> QueryContext:
     """
     Full retrieval phase: analyze → build filters → retrieve per sub-question
-    → deduplicate → parent-content swap → optional ColBERT rerank → top_k cut.
+    → deduplicate → parent-content swap → top_k cut.
+    ColBERT second-pass reranking (if enabled) runs inside the pipeline.
 
     Raises:
         ValueError       — invalid filter expression in request.filters
@@ -425,14 +427,6 @@ async def prepare_context(
         "Parent   → %d merged → %d unique sections (budget=%d)",
         before_swap, len(merged_docs), candidate_budget,
     )
-
-    # 5. Optional ColBERT second-pass reranker
-    if settings.colbert_enabled and colbert_reranker is not None:
-        before_colbert = len(merged_docs)
-        merged_docs    = colbert_reranker.rerank(request.query, merged_docs)
-        logger.info("ColBERT  → %d → %d doc(s)", before_colbert, len(merged_docs))
-    else:
-        logger.debug("ColBERT  → disabled")
 
     merged_docs = merged_docs[:request.top_k]
 

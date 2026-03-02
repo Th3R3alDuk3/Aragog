@@ -23,7 +23,7 @@ router = APIRouter(prefix="/evaluation", tags=["evaluation"])
         "Requires RAGAS_ENABLED=true in .env."
     ),
 )
-async def run_evaluation(
+async def evaluate_rag(
     request: EvaluationRequest,
     settings: Settings = Depends(get_settings),
     retrieval_pipeline: AsyncPipeline = Depends(get_retrieval_pipeline),

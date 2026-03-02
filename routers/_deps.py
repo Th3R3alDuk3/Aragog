@@ -56,11 +56,6 @@ def get_retrieval_pipeline(request: Request) -> AsyncPipeline:
     return request.app.state.retrieval_pipeline
 
 
-def get_colbert_reranker(request: Request):
-    """None if COLBERT_ENABLED=false."""
-    return request.app.state.colbert_reranker
-
-
 # --- Generation ---
 
 

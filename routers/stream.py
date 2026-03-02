@@ -7,14 +7,12 @@ from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from jinja2 import Environment
 from sse_starlette.sse import EventSourceResponse
 
-from components.colbert_reranker import ColBERTReranker
 from components.hyde_generator import HyDEGenerator
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
 from models.schemas import QueryRequest
 from pipelines.generation import RAG_PROMPT
 from routers._deps import (
-    get_colbert_reranker,
     get_hyde_generator,
     get_query_analyzer,
     get_retrieval_pipeline,
@@ -43,7 +41,6 @@ async def query_stream(
     retrieval_pipeline: AsyncPipeline = Depends(get_retrieval_pipeline),
     query_analyzer: QueryAnalyzer = Depends(get_query_analyzer),
     hyde_generator: HyDEGenerator | None = Depends(get_hyde_generator),
-    colbert_reranker: ColBERTReranker | None = Depends(get_colbert_reranker),
 ) -> EventSourceResponse:
     try:
         ctx = await query_service.prepare_context(
@@ -52,7 +49,6 @@ async def query_stream(
             retrieval_pipeline,
             query_analyzer,
             hyde_generator,
-            colbert_reranker,
         )
     except ValueError as error:
         raise HTTPException(

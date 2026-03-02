@@ -1,50 +1,27 @@
-"""
-ColBERT Late-Interaction Reranker — second-pass reranker using pylate.
-
-What ColBERT does
-─────────────────
-Unlike bi-encoders (single vector per query/document) ColBERT encodes every
-token in both the query and the document into separate vectors.  The relevance
-score is computed as the *MaxSim* aggregation of fine-grained query-token to
-document-token similarities — "late interaction".
-
-This catches precise term-level matching that a single dense vector misses
-while remaining more efficient than a full cross-encoder (no joint encoding).
-
-Integration position
-────────────────────
-Applied as a **second-pass reranker** after the ``SentenceTransformersSimilarityRanker``
-(cross-encoder) has already narrowed candidates to ``COLBERT_TOP_K`` documents.
-Does NOT require any index changes — scores are computed on-the-fly at query time.
-
-Performance note
-────────────────
-``colbert-ir/colbertv2.0`` is ~500 MB.  The model is downloaded once and cached
-by the HuggingFace hub.  Inference is fast for small candidate sets (≤ 20 docs)
-on CPU; GPU is used automatically if available.
-
-Error handling
-──────────────
-Any exception during reranking falls back silently to the cross-encoder order
-so the endpoint never fails due to ColBERT issues.
-"""
-
-import logging
+from logging import getLogger
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from haystack import Document, component
+
+logger = getLogger(__name__)
 
 
+@component
 class ColBERTReranker:
     """
-    ColBERT late-interaction second-pass reranker.
+    ColBERT late-interaction second-pass reranker — Haystack component.
 
     Args:
         model_name: HuggingFace model ID (default: ``colbert-ir/colbertv2.0``).
         top_k:      Number of documents to return after reranking.
     """
 
-    def __init__(self, model_name: str = "colbert-ir/colbertv2.0", top_k: int = 5, device: str = "cpu") -> None:
+    def __init__(self, 
+        model_name: str = "colbert-ir/colbertv2.0", 
+        top_k: int = 5, 
+        device: str = "cpu"
+    ) -> None:
+
         self.top_k = top_k
         self._model_name = model_name
         self._device = device
@@ -67,7 +44,8 @@ class ColBERTReranker:
                     "Install it with: uv add pylate"
                 ) from exc
 
-    def rerank(self, query: str, documents: list) -> list:
+    @component.output_types(documents=list[Document])
+    def run(self, query: str, documents: list[Document]) -> dict[str, list[Document]]:
         """Re-score documents against the query using ColBERT late interaction.
 
         Falls back to the cross-encoder input order on any error so the endpoint
@@ -78,20 +56,20 @@ class ColBERTReranker:
             documents: Candidate documents from the upstream cross-encoder reranker.
 
         Returns:
-            At most ``top_k`` documents sorted by ColBERT MaxSim score, or the
-            input list (truncated to ``top_k``) if reranking fails.
+            Dict with ``documents`` key — at most ``top_k`` docs sorted by ColBERT
+            MaxSim score, or the input list (truncated to ``top_k``) if reranking fails.
         """
         if not documents:
-            return documents
+            return {"documents": documents}
 
         try:
             self._load_model()
-            return self._rerank_internal(query, documents)
+            return {"documents": self._rerank_internal(query, documents)}
         except Exception as exc:
             logger.warning(
                 "ColBERT reranking failed (%s), keeping cross-encoder order", exc
             )
-            return documents[: self.top_k]
+            return {"documents": documents[: self.top_k]}
 
     def _rerank_internal(self, query: str, documents: list) -> list:
         """Encode query and documents with ColBERT and return top-k by MaxSim score.

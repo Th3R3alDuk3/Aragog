@@ -101,21 +101,6 @@ async def lifespan(app: FastAPI):
 
         logger.info("HyDE enabled (model: %s)", settings.llm_model)
 
-    # ColBERT: optional — loads ~500 MB model when COLBERT_ENABLED=true.
-
-    colbert_reranker = None
-
-    if settings.colbert_enabled:
-        from components.colbert_reranker import ColBERTReranker
-
-        colbert_reranker = ColBERTReranker(
-            model_name=settings.colbert_model,
-            top_k=settings.colbert_top_k,
-            device=settings.colbert_device,
-        )
-
-        logger.info("ColBERT reranker enabled (model: %s)", settings.colbert_model)
-
     app.state.settings = settings
     app.state.document_store = document_store
     app.state.indexing_pipeline = indexing_pipeline
@@ -125,7 +110,6 @@ async def lifespan(app: FastAPI):
     app.state.minio_store = minio_store
     app.state.query_analyzer = query_analyzer
     app.state.hyde_generator = hyde_generator
-    app.state.colbert_reranker = colbert_reranker
     app.state.tasks = BoundedTaskStore(settings.task_store_size)
 
     yield

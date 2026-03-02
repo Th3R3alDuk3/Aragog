@@ -1,38 +1,3 @@
-"""
-Retrieval pipeline — Advanced Hybrid RAG (Haystack 2.x + Qdrant)
-
-Pipeline flow per sub-question
-───────────────────────────────
-
-  Query text
-      │
-      ├─ SentenceTransformersTextEmbedder ──→ dense vector
-      │                                              │
-      │                                   QdrantEmbeddingRetriever
-      │                                              │
-      └─ FastembedSparseTextEmbedder ──→ sparse vector
-                                                     │
-                                          QdrantSparseEmbeddingRetriever
-                                                     │
-                                   DocumentJoiner (Reciprocal Rank Fusion)
-                                                     │
-                              SentenceTransformersSimilarityRanker (cross-encoder)
-
-Multi-question handling
-───────────────────────
-Multi-question decomposition happens at the router layer (routers/query.py),
-not inside this pipeline.  The router calls QueryAnalyzer, runs this
-pipeline once per sub-question, merges document sets, and then passes the
-combined context to the generation pipeline.
-
-Parent-child retrieval
-──────────────────────
-Child chunks (small, precise) are stored in Qdrant and retrieved.
-swap_to_parent_content() replaces each child's content with
-meta["parent_content"] (full markdown section) before the LLM
-generates its answer — broader context without sacrificing retrieval precision.
-"""
-
 from haystack import Document
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack.components.joiners import DocumentJoiner
@@ -57,8 +22,9 @@ def build_retrieval_pipeline(
     """Build the hybrid retrieval pipeline.
 
     Combines dense and sparse retrievers via Reciprocal Rank Fusion, followed
-    by a cross-encoder reranker.  Called once at startup; the returned pipeline
-    is reused for every query.
+    by a cross-encoder reranker.  If ``COLBERT_ENABLED=true`` in settings, a
+    ColBERT second-pass reranker is wired after the cross-encoder.
+    Called once at startup; the returned pipeline is reused for every query.
 
     Args:
         settings:       Application settings for retriever top-k values and
@@ -69,23 +35,45 @@ def build_retrieval_pipeline(
     Returns:
         A Haystack ``AsyncPipeline`` with components ``dense_embedder``,
         ``sparse_embedder``, ``dense_retriever``, ``sparse_retriever``,
-        ``joiner``, and ``reranker`` wired in sequence.
+        ``joiner``, ``reranker``, and optionally ``colbert_reranker``.
     """
-    dense_embedder   = build_text_embedder(settings)
-    sparse_embedder  = build_sparse_text_embedder(settings)
-    dense_retriever  = QdrantEmbeddingRetriever(
+    
+    # --- Stage 1: dense query embedding ---
+    dense_embedder = build_text_embedder(settings)
+
+    # --- Stage 2: sparse query embedding (SPLADE / BM42) ---
+    sparse_embedder = build_sparse_text_embedder(settings)
+
+    # --- Stage 3: dense retrieval ---
+    dense_retriever = QdrantEmbeddingRetriever(
         document_store=document_store,
         top_k=settings.dense_retriever_top_k,
     )
+
+    # --- Stage 4: sparse retrieval ---
     sparse_retriever = QdrantSparseEmbeddingRetriever(
         document_store=document_store,
         top_k=settings.sparse_retriever_top_k,
     )
+
+    # --- Stage 5: RRF fusion ---
     joiner = DocumentJoiner(
         join_mode="reciprocal_rank_fusion",
         top_k=max(settings.dense_retriever_top_k, settings.sparse_retriever_top_k),
     )
+
+    # --- Stage 6: cross-encoder reranker ---
     reranker = build_reranker(settings)
+
+    # --- Stage 7 (optional): ColBERT late-interaction second-pass reranker ---
+    colbert_reranker = None
+    if settings.colbert_enabled:
+        from components.colbert_reranker import ColBERTReranker
+        colbert_reranker = ColBERTReranker(
+            model_name=settings.colbert_model,
+            top_k=settings.colbert_top_k,
+            device=settings.colbert_device,
+        )
 
     retrieval = AsyncPipeline()
     retrieval.add_component("dense_embedder",   dense_embedder)
@@ -94,11 +82,15 @@ def build_retrieval_pipeline(
     retrieval.add_component("sparse_retriever", sparse_retriever)
     retrieval.add_component("joiner",           joiner)
     retrieval.add_component("reranker",         reranker)
+    if colbert_reranker is not None:
+        retrieval.add_component("colbert_reranker", colbert_reranker)
     retrieval.connect("dense_embedder.embedding",         "dense_retriever.query_embedding")
     retrieval.connect("dense_retriever.documents",        "joiner.documents")
     retrieval.connect("sparse_embedder.sparse_embedding", "sparse_retriever.query_sparse_embedding")
     retrieval.connect("sparse_retriever.documents",       "joiner.documents")
     retrieval.connect("joiner.documents",                 "reranker.documents")
+    if colbert_reranker is not None:
+        retrieval.connect("reranker.documents", "colbert_reranker.documents")
 
     return retrieval
 
