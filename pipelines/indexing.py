@@ -1,49 +1,3 @@
-"""
-Indexing pipeline (Haystack 2.x + Qdrant)
-
-Full pipeline flow — Anthropic Contextual Retrieval
-────────────────────────────────────────────────────
-
-  DoclingConverter          Convert PDF/DOCX/… → markdown via docling-serve (Gradio API)
-        │
-  MetadataEnricher          doc_id, title, word_count, indexed_at, indexed_at_ts,
-        │                   language (via langdetect on the full doc, most accurate),
-        │                   doc_beginning (first N chars for context prefix LLM),
-        │                   embedding provenance.
-        │
-  DocumentCleaner           Normalise whitespace, remove empty lines.
-        │
-  MarkdownHeaderSplitter    Split at H1-H6 heading boundaries (built-in Haystack).
-        │                   Sets meta["header"] and meta["parent_headers"] per chunk.
-        │
-  ParentChildSplitter       For sections > child_chunk_size words: split into smaller
-        │                   child chunks using RecursiveDocumentSplitter (built-in).
-        │                   Stores parent section text in meta["parent_content"].
-        │
-  ChunkContextEnricher      chunk_index, chunk_total, section_title (← meta["header"]),
-        │                   section_path (← parent_headers › header), chunk_type.
-        │
-  ContentAnalyzer           ONE LLM call per chunk (parallelised, OpenAI-compat):
-        │                   • context_prefix  → prepended to chunk before embedding
-        │                   • summary, keywords, classification, entities
-        │                   Stores original chunk in meta["original_content"].
-        │                   Language is already in meta — not re-detected here.
-        │
-  [RaptorSummarizer]        OPTIONAL (RAPTOR_ENABLED=true): adds section-level
-        │                   and document-level summary chunks alongside normal chunks.
-        │                   chunk_type="raptor_section" | "raptor_doc"
-        │                   Enables high-level retrieval for overview/summary questions.
-        │
-  DocumentEmbedder          Dense vector via SentenceTransformers (HuggingFace, local).
-        │                   Embeds: context_prefix + section_title + chunk_content.
-        │
-  SparseDocumentEmbedder    SPLADE / BM42 sparse vector via FastEmbed (local ONNX).
-        │
-  DocumentWriter            Write to QdrantDocumentStore (OVERWRITE policy).
-
-See models/README.md for the full metadata specification.
-"""
-
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack.utils import Secret
 from haystack.components.preprocessors import DocumentCleaner, MarkdownHeaderSplitter
@@ -171,21 +125,18 @@ def build_indexing_pipeline(
     pipeline.add_component("sparse_embedder",       sparse_embedder)
     pipeline.add_component("writer",                writer)
 
-    pipeline.connect("converter.documents",                "meta_enricher.documents")
-    pipeline.connect("meta_enricher.documents",            "cleaner.documents")
-    pipeline.connect("cleaner.documents",                  "header_splitter.documents")
-    pipeline.connect("header_splitter.documents",          "parent_child_splitter.documents")
-    pipeline.connect("parent_child_splitter.documents",    "chunk_enricher.documents")
-    pipeline.connect("chunk_enricher.documents",           "analyzer.documents")
-
-    # Conditional RAPTOR stage: inserted between analyzer and dense_embedder
+    pipeline.connect("converter.documents",             "meta_enricher.documents")
+    pipeline.connect("meta_enricher.documents",         "cleaner.documents")
+    pipeline.connect("cleaner.documents",               "header_splitter.documents")
+    pipeline.connect("header_splitter.documents",       "parent_child_splitter.documents")
+    pipeline.connect("parent_child_splitter.documents", "chunk_enricher.documents")
+    pipeline.connect("chunk_enricher.documents",        "analyzer.documents")
     if raptor:
-        pipeline.connect("analyzer.documents",             "raptor.documents")
-        pipeline.connect("raptor.documents",               "dense_embedder.documents")
+        pipeline.connect("analyzer.documents",          "raptor.documents")
+        pipeline.connect("raptor.documents",            "dense_embedder.documents")
     else:
-        pipeline.connect("analyzer.documents",             "dense_embedder.documents")
-
-    pipeline.connect("dense_embedder.documents",           "sparse_embedder.documents")
-    pipeline.connect("sparse_embedder.documents",          "writer.documents")
+        pipeline.connect("analyzer.documents",          "dense_embedder.documents")
+    pipeline.connect("dense_embedder.documents",        "sparse_embedder.documents")
+    pipeline.connect("sparse_embedder.documents",       "writer.documents")
 
     return pipeline, document_store

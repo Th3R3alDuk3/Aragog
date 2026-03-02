@@ -12,7 +12,6 @@ Full query pipeline:
 Feature flags (controlled via .env):
   HYDE_ENABLED  — hypothetical document embedding for dense retrieval
   CRAG_ENABLED  — corrective re-retrieval on low relevance score
-  COLBERT_ENABLED — ColBERT late-interaction second-pass reranker
 """
 
 import logging
