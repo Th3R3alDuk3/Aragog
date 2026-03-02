@@ -23,7 +23,7 @@ from haystack.dataclasses import Document, GeneratedAnswer
 
 from components.query_analyzer import AnalysisResult, QueryAnalyzer
 from config import Settings
-from models.schemas import QueryRequest, SourceDocument
+from models.api import QueryRequest, SourceDocument
 from pipelines.retrieval import swap_to_parent_content
 
 logger = logging.getLogger(__name__)

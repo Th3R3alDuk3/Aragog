@@ -6,7 +6,7 @@ from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from components.hyde_generator import HyDEGenerator
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
-from models.schemas import QueryRequest, QueryResponse
+from models.api import QueryRequest, QueryResponse
 from routers._deps import (
     get_generation_pipeline,
     get_hyde_generator,

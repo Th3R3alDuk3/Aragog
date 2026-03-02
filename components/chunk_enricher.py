@@ -1,9 +1,10 @@
 from collections import defaultdict
 from logging import getLogger
 from re import IGNORECASE, MULTILINE, compile
-from typing import Any
 
 from haystack import Document, component
+
+from models.meta import ChunkMetadata
 
 logger = getLogger(__name__)
 
@@ -40,7 +41,7 @@ class ChunkEnricher:
         # Group chunks by parent doc_id (set by MetadataEnricher)
         groups: dict[str, list[Document]] = defaultdict(list)
         for doc in documents:
-            key = doc.meta.get("doc_id", doc.id or "unknown")
+            key = ChunkMetadata.model_validate(doc.meta).doc_id or doc.id or "unknown"
             groups[key].append(doc)
 
         enriched: list[Document] = []
@@ -81,32 +82,18 @@ def _enrich_group(doc_id: str, chunks: list[Document]) -> list[Document]:
     result: list[Document] = []
     for idx, chunk in enumerate(chunks):
         content = chunk.content or ""
-        meta: dict[str, Any] = dict(chunk.meta)
+        meta = ChunkMetadata.model_validate(chunk.meta)
 
-        # ----------------------------------------------------------------
-        # Chunk position
-        # ----------------------------------------------------------------
-        meta["chunk_index"] = idx
-        meta["chunk_total"] = total
+        meta.chunk_index = idx
+        meta.chunk_total = total
 
-        # ----------------------------------------------------------------
-        # Section title / path — read from MarkdownHeaderSplitter metadata
-        # meta["header"]         : immediate heading text (str)
-        # meta["parent_headers"] : list of ancestor headings (list[str])
-        # ----------------------------------------------------------------
-        header = meta.get("header", "") or ""
-        parent_headers = meta.get("parent_headers") or []
+        meta.section_title = meta.header
+        breadcrumb = [h for h in meta.parent_headers if h] + ([meta.header] if meta.header else [])
+        meta.section_path = " › ".join(breadcrumb)
 
-        meta["section_title"] = header
-        breadcrumb = [h for h in parent_headers if h] + ([header] if header else [])
-        meta["section_path"] = " › ".join(breadcrumb)
+        meta.chunk_type = _detect_chunk_type(content)
 
-        # ----------------------------------------------------------------
-        # Chunk type heuristic
-        # ----------------------------------------------------------------
-        meta["chunk_type"] = _detect_chunk_type(content)
-
-        result.append(Document(content=content, meta=meta, id=chunk.id))
+        result.append(Document(content=content, meta=meta.model_dump(), id=chunk.id))
 
     return result
 

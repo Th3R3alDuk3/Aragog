@@ -18,7 +18,7 @@ from pathlib import Path
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
-from models.schemas import IndexResponse, TaskState
+from models.api import IndexResponse, TaskState
 from services.minio_store import MinioStore
 
 logger = logging.getLogger(__name__)

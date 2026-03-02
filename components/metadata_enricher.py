@@ -2,9 +2,10 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from logging import getLogger
 from re import compile, MULTILINE
-from typing import Any
 
 from haystack import Document, component
+
+from models.meta import ChunkMetadata
 
 try:
     from langdetect import detect as _langdetect
@@ -64,66 +65,42 @@ class MetadataEnricher:
 
         for doc in documents:
             content = doc.content or ""
-            meta: dict[str, Any] = dict(doc.meta)
+            meta = ChunkMetadata.model_validate(doc.meta)
 
-            # ----------------------------------------------------------------
-            # Stable document identity
-            # ----------------------------------------------------------------
             # Use source (original filename) not file_path (temp path) so the
             # doc_id stays the same across re-indexing of the same file.
-            raw_key = f"{meta.get('source', '')}{content}"
-            meta["doc_id"] = sha256(raw_key.encode()).hexdigest()
+            meta.doc_id = sha256(f"{meta.source}{content}".encode()).hexdigest()
 
-            # ----------------------------------------------------------------
-            # Title — first H1 or filename stem
-            # ----------------------------------------------------------------
-            if "title" not in meta or not meta["title"]:
-                meta["title"] = _extract_title(content, meta.get("source", ""))
+            if not meta.title:
+                meta.title = _extract_title(content, meta.source)
 
-            # ----------------------------------------------------------------
-            # Word count (rough: split on whitespace)
-            # ----------------------------------------------------------------
-            meta["word_count"] = len(content.split())
+            meta.word_count = len(content.split())
 
-            # ----------------------------------------------------------------
-            # Indexing timestamp
-            # ----------------------------------------------------------------
             now = datetime.now(timezone.utc)
-            meta["indexed_at"] = now.isoformat()
-            meta["indexed_at_ts"] = int(now.timestamp())  # Unix epoch for range filters
+            meta.indexed_at = now.isoformat()
+            meta.indexed_at_ts = int(now.timestamp())
 
-            # ----------------------------------------------------------------
-            # Language detection (local, no LLM)
-            # Detected on the full document before splitting for maximum accuracy.
-            # Every chunk inherits this field via split metadata propagation.
-            # ----------------------------------------------------------------
-            meta["language"] = _detect_language(content)
+            meta.language = _detect_language(content)
 
-            # ----------------------------------------------------------------
-            # Document beginning — passed to ContentAnalyzer for the contextual
-            # prefix LLM call, then stripped before writing to Qdrant.
-            # ----------------------------------------------------------------
-            meta["doc_beginning"] = content[: self.doc_beginning_chars]
+            # Ephemeral: consumed by ContentAnalyzer, stripped before Qdrant write.
+            meta.doc_beginning = content[: self.doc_beginning_chars]
 
-            # ----------------------------------------------------------------
-            # Embedding provenance (inherited by every chunk after split)
-            # ----------------------------------------------------------------
-            meta["embedding_model"] = self.embedding_model
-            meta["embedding_provider"] = self.embedding_provider
-            meta["embedding_dimension"] = self.embedding_dimension
+            meta.embedding_model = self.embedding_model
+            meta.embedding_provider = self.embedding_provider
+            meta.embedding_dimension = self.embedding_dimension
 
-            # Merge any caller-provided extra fields (e.g. minio_url, minio_key)
+            dumped = meta.model_dump()
             if extra_meta:
-                meta.update(extra_meta)
+                dumped.update(extra_meta)
 
-            enriched.append(Document(content=content, meta=meta))
+            enriched.append(Document(content=content, meta=dumped))
             logger.info(
                 "MetadataEnricher: '%s' | title='%s' | lang=%s | words=%d | doc_id=%s…",
-                meta.get("source", "?"),
-                meta.get("title", ""),
-                meta.get("language", "?"),
-                meta.get("word_count", 0),
-                meta.get("doc_id", "")[:12],
+                meta.source,
+                meta.title,
+                meta.language,
+                meta.word_count,
+                meta.doc_id[:12],
             )
 
         logger.info("MetadataEnricher: enriched %d document(s)", len(enriched))

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
-from models.schemas import TaskCreatedResponse, TaskState
+from models.api import TaskCreatedResponse, TaskState
 from routers._deps import (
     get_document_store,
     get_indexing_pipeline,

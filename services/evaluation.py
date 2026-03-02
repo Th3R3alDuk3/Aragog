@@ -16,7 +16,7 @@ from typing import Any
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
 
 from config import Settings
-from models.schemas import EvaluationRequest, EvaluationResponse
+from models.api import EvaluationRequest, EvaluationResponse
 from pipelines.retrieval import swap_to_parent_content
 from services import query as query_service
 

@@ -10,7 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from components.hyde_generator import HyDEGenerator
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
-from models.schemas import QueryRequest
+from models.api import QueryRequest
 from pipelines.generation import RAG_PROMPT
 from routers._deps import (
     get_hyde_generator,

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
 
 from config import Settings
-from models.schemas import EvaluationRequest, EvaluationResponse
+from models.api import EvaluationRequest, EvaluationResponse
 from routers._deps import get_generation_pipeline, get_retrieval_pipeline, get_settings
 from services import evaluation as evaluation_service
 

@@ -24,10 +24,11 @@ The query pipeline's ``swap_to_parent_content()`` passes the *parent*
 """
 
 import logging
-from typing import Any
 
 from haystack import Document, component
 from haystack.components.preprocessors import RecursiveDocumentSplitter
+
+from models.meta import ChunkMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -103,17 +104,7 @@ class ParentChildSplitter:
 # ---------------------------------------------------------------------------
 
 def _with_parent(child: Document, parent_text: str) -> Document:
-    """Return a copy of ``child`` with ``parent_content`` added to its metadata.
-
-    Args:
-        child:       The child chunk document.
-        parent_text: Full text of the section the child was split from.
-
-    Returns:
-        A new Document identical to ``child`` but with ``parent_content`` and
-        ``parent_section`` set in its metadata.
-    """
-    meta: dict[str, Any] = dict(child.meta)
-    meta["parent_content"] = parent_text
-    meta["parent_section"] = meta.get("header", "")
-    return Document(content=child.content, meta=meta, id=child.id)
+    meta = ChunkMetadata.model_validate(child.meta)
+    meta.parent_content = parent_text
+    meta.parent_section = meta.header
+    return Document(content=child.content, meta=meta.model_dump(), id=child.id)

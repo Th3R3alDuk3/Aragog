@@ -5,6 +5,8 @@ from haystack import Document, component
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
+from models.meta import ChunkMetadata, Entities
+
 logger = getLogger(__name__)
 
 _SYSTEM = (
@@ -28,36 +30,9 @@ Chunk text:
 """
 
 
-# Entity taxonomy based on OntoNotes 5 (spaCy standard), adapted for document RAG.
-class Entities(BaseModel):
-    persons: list[str] = Field(default_factory=list, description="Full person names.")
-    organizations: list[str] = Field(
-        default_factory=list, description="Companies, agencies, institutions."
-    )
-    locations: list[str] = Field(
-        default_factory=list, description="Countries, cities, regions."
-    )
-    dates: list[str] = Field(
-        default_factory=list, description="All temporal expressions."
-    )
-    products: list[str] = Field(
-        default_factory=list, description="Product names, software, brand names."
-    )
-    laws_and_standards: list[str] = Field(
-        default_factory=list,
-        description="Laws, regulations, norms (e.g. GDPR, ISO 9001, §17).",
-    )
-    events: list[str] = Field(
-        default_factory=list,
-        description="Named events, projects, incidents, conferences.",
-    )
-    quantities: list[str] = Field(
-        default_factory=list,
-        description="Monetary values, percentages, measurements with units.",
-    )
-
-
 class ChunkAnalysis(BaseModel):
+    """LLM response format — subset of ChunkMetadata filled by the AI."""
+
     context_prefix: str = Field(
         description="1-2 sentences situating this chunk within the broader document."
     )
@@ -120,14 +95,12 @@ class ContentAnalyzer:
         return list(await asyncio.gather(*tasks))
 
     async def _analyze(self, doc: Document, sem: asyncio.Semaphore) -> Document:
-        meta = doc.meta
+        meta = ChunkMetadata.model_validate(doc.meta)
         content = (doc.content or "")[: self.max_chars]
         prompt = _USER_PROMPT.format(
-            title=meta.get("title", "Unknown"),
-            doc_beginning=(meta.get("doc_beginning", "") or "")[
-                : self.doc_beginning_chars
-            ],
-            section_path=meta.get("section_path", ""),
+            title=meta.title or "Unknown",
+            doc_beginning=meta.doc_beginning[: self.doc_beginning_chars],
+            section_path=meta.section_path,
             taxonomy=self.taxonomy,
             chunk_content=content,
         )
@@ -149,7 +122,7 @@ class ContentAnalyzer:
         except Exception as exc:
             logger.warning(
                 "ContentAnalyzer: LLM call failed for '%s': %s",
-                meta.get("source", doc.id),
+                meta.source or doc.id,
                 exc,
             )
             analysis = fallback
@@ -157,19 +130,28 @@ class ContentAnalyzer:
 
 
 def _apply(doc: Document, analysis: ChunkAnalysis) -> Document:
-    original_content = doc.content or ""
+    meta = ChunkMetadata.model_validate(doc.meta)
     prefix = analysis.context_prefix.strip()
-    embedded_content = f"{prefix}\n\n{original_content}" if prefix else original_content
 
-    meta = dict(doc.meta)
-    meta.pop("doc_beginning", None)
+    meta.original_content = doc.content or ""
+    meta.context_prefix = prefix
+    meta.summary = analysis.summary
+    meta.keywords = analysis.keywords
+    meta.classification = analysis.classification
 
-    meta["original_content"] = original_content
-    meta["context_prefix"] = prefix
-    meta.setdefault("language", "unknown")
-    meta["summary"] = analysis.summary
-    meta["keywords"] = analysis.keywords
-    meta["classification"] = analysis.classification
-    meta["entities"] = analysis.entities.model_dump()
+    e = analysis.entities
+    meta.ent_persons       = e.persons
+    meta.ent_organizations = e.organizations
+    meta.ent_locations     = e.locations
+    meta.ent_dates         = e.dates
+    meta.ent_products      = e.products
+    meta.ent_laws          = e.laws_and_standards
+    meta.ent_events        = e.events
+    meta.ent_quantities    = e.quantities
 
-    return Document(content=embedded_content, meta=meta, id=doc.id)
+    embedded_content = f"{prefix}\n\n{meta.original_content}" if prefix else meta.original_content
+    return Document(
+        content=embedded_content,
+        meta=meta.model_dump(exclude={"doc_beginning"}),
+        id=doc.id,
+    )

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from models.schemas import TaskState
+from models.api import TaskState
 from routers._deps import get_task_store
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])

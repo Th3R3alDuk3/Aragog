@@ -1,30 +1,3 @@
-"""
-Embedder + reranker + generator factories.
-
-Embedding strategy
-──────────────────
-Dense  : SentenceTransformers (HuggingFace, local inference).
-         Default: BAAI/bge-m3  (multilingual, 1024 dim, state of the art).
-
-Sparse : SPLADE / BM42 via FastEmbed (local ONNX inference, no API needed).
-         Default: Qdrant/bm42-all-minilm-l6-v2-attentions (multilingual).
-
-Both embedders run entirely on the local machine.
-
-Reranker
-────────
-HuggingFace cross-encoder — SentenceTransformersSimilarityRanker (Haystack ≥ 2.9).
-Default: BAAI/bge-reranker-v2-m3 (multilingual, state of the art).
-Note: TransformersSimilarityRanker is the legacy class and is deprecated.
-
-LLM
-────
-OpenAI-compatible generator (OpenAIGenerator from haystack-ai).
-Works with any OpenAI Chat Completions API-compatible endpoint:
-  OpenAI, Ollama, vLLM, LM Studio, Groq, Together AI, …
-"""
-
-
 from config import Settings
 from haystack.components.generators import OpenAIGenerator
 from haystack.utils import Secret, ComponentDevice
@@ -60,16 +33,32 @@ def _onnx_providers(device: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+_EMBED_META_FIELDS = [
+    # structural context
+    "section_title",
+    "title",
+    # AI-generated semantic fields
+    "summary",
+    "keywords",
+    # named entities (flat list[str])
+    "ent_persons",
+    "ent_organizations",
+    "ent_products",
+    "ent_laws",
+]
+
+
 def build_document_embedder(settings: Settings) -> SentenceTransformersDocumentEmbedder:
     """
     Dense document embedder for the indexing pipeline.
 
-    ``meta_fields_to_embed`` appends the section title and contextual prefix
-    to the embedded text so that even short chunks are richly represented.
+    ``meta_fields_to_embed`` appends structural and semantic metadata to the
+    embedded text.  ``context_prefix`` is already prepended to document.content
+    by ContentAnalyzer and therefore not listed here.
     """
     return SentenceTransformersDocumentEmbedder(
         model=settings.embedding_model,
-        meta_fields_to_embed=["section_title", "context_prefix"],
+        meta_fields_to_embed=_EMBED_META_FIELDS,
         normalize_embeddings=True,
         device=ComponentDevice.from_str(settings.embedding_device),
     )
@@ -100,6 +89,7 @@ def build_sparse_document_embedder(settings: Settings):
     return FastembedSparseDocumentEmbedder(
         model=settings.sparse_embedding_model,
         model_kwargs={"providers": _onnx_providers(settings.sparse_embedding_device)},
+        meta_fields_to_embed=_EMBED_META_FIELDS,
     )
 
 
