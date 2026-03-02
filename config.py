@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     sparse_embedding_device: str = "cpu"
 
     # --- Content Analyzer (one LLM call per chunk during indexing) ---
-    analyzer_max_workers: int = 8
+    analyzer_max_concurrency: int = 8
     analyzer_max_chars: int = 4000
 
     # --- Classification Taxonomy ---

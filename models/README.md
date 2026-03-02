@@ -160,12 +160,14 @@ This is the authoritative field specification.
   "classification":  "financial",  // One label from CLASSIFICATION_TAXONOMY in .env
 
   "entities": {
-    "organizations":    ["Musterfirma GmbH", "Bundesanstalt für…"],
-    "persons":          ["Max Mustermann"],
-    "locations":        ["München", "Deutschland"],
-    "dates":            ["Q3 2024", "September 2024", "FY2023"],
-    "technologies":     ["SAP S/4HANA", "Power BI"],
-    "monetary_amounts": ["€ 4,2 Mrd.", "12 %", "ca. 1 500 Mitarbeiter"]
+    "persons":            ["Max Mustermann"],
+    "organizations":      ["Musterfirma GmbH", "Bundesanstalt für…"],
+    "locations":          ["München", "Deutschland"],
+    "dates":              ["Q3 2024", "September 2024", "FY2023"],
+    "products":           ["SAP S/4HANA", "Power BI"],
+    "laws_and_standards": ["HGB §285", "ISO 9001"],
+    "events":             ["Hauptversammlung 2024", "Q3 Earnings Call"],
+    "quantities":         ["€ 4,2 Mrd.", "12 %", "ca. 1 500 Mitarbeiter"]
   },
 
   // ── Embedding Provenance (set by MetadataEnricher) ───────────────────────
@@ -233,8 +235,10 @@ This is the authoritative field specification.
 | `entities.persons` | string[] | ContentAnalyzer | |
 | `entities.locations` | string[] | ContentAnalyzer | |
 | `entities.dates` | string[] | ContentAnalyzer | All temporal expressions |
-| `entities.technologies` | string[] | ContentAnalyzer | Products, systems, standards |
-| `entities.monetary_amounts` | string[] | ContentAnalyzer | Values with units |
+| `entities.products` | string[] | ContentAnalyzer | Product names, software, brand names |
+| `entities.laws_and_standards` | string[] | ContentAnalyzer | Laws, regulations, norms |
+| `entities.events` | string[] | ContentAnalyzer | Named events, projects, incidents |
+| `entities.quantities` | string[] | ContentAnalyzer | Monetary values, percentages, measurements |
 
 ### Embedding provenance
 

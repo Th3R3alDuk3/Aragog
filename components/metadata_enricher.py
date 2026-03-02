@@ -1,49 +1,24 @@
-"""
-MetadataEnricher — Haystack 2.x custom component.
-
-Runs BEFORE DocumentSplitter on the full (unsplit) document that DoclingConverter
-produced.  Enriches each document with stable, document-level metadata so that
-every chunk inherits them after splitting.
-
-Metadata added
---------------
-doc_id          : SHA-256 of (file_path + raw content). Stable across re-indexing
-                  if the file does not change.  Used to overwrite stale chunks.
-title           : First H1 heading found in the markdown, or the filename stem.
-word_count      : Approximate word count of the full document.
-indexed_at      : ISO-8601 UTC timestamp of this indexing run.
-indexed_at_ts   : Unix epoch integer of indexed_at — used for date-range filters
-                  (Qdrant range filter on integer fields is natively supported).
-language        : ISO 639-1 language code detected by langdetect on the full
-                  document text before splitting.  Detecting on the full text is
-                  more accurate than detecting per-chunk.  Falls back to "unknown"
-                  if detection fails (short or mixed-language documents).
-embedding_model : From Settings — recorded once so every chunk knows which model
-                  produced its vector.
-embedding_provider / embedding_dimension : ditto.
-"""
-
-import hashlib
-import re
 from datetime import datetime, timezone
+from hashlib import sha256
+from logging import getLogger
+from re import compile, MULTILINE
 from typing import Any
-
-import logging
 
 from haystack import Document, component
 
 try:
     from langdetect import detect as _langdetect
     from langdetect import DetectorFactory
-    DetectorFactory.seed = 0   # reproducible results
+
+    DetectorFactory.seed = 0  # reproducible results
     _LANGDETECT_AVAILABLE = True
 except ImportError:
     _LANGDETECT_AVAILABLE = False
 
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 
 # Matches ATX-style markdown headings: # H1 / ## H2 / ### H3 …
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
+_HEADING_RE = compile(r"^(#{1,6})\s+(.+)$", MULTILINE)
 
 
 @component
@@ -64,13 +39,16 @@ class MetadataEnricher:
         embedding_dimension: int,
         doc_beginning_chars: int = 1500,
     ) -> None:
+
         self.embedding_model = embedding_model
         self.embedding_provider = embedding_provider
         self.embedding_dimension = embedding_dimension
         self.doc_beginning_chars = doc_beginning_chars
 
     @component.output_types(documents=list[Document])
-    def run(self, documents: list[Document], extra_meta: dict | None = None) -> dict[str, list[Document]]:
+    def run(
+        self, documents: list[Document], extra_meta: dict | None = None
+    ) -> dict[str, list[Document]]:
         """Enrich each document with stable, document-level metadata fields.
 
         Adds doc_id, title, word_count, indexed_at timestamps, detected language,
@@ -94,7 +72,7 @@ class MetadataEnricher:
             # Use source (original filename) not file_path (temp path) so the
             # doc_id stays the same across re-indexing of the same file.
             raw_key = f"{meta.get('source', '')}{content}"
-            meta["doc_id"] = hashlib.sha256(raw_key.encode()).hexdigest()
+            meta["doc_id"] = sha256(raw_key.encode()).hexdigest()
 
             # ----------------------------------------------------------------
             # Title — first H1 or filename stem
@@ -111,7 +89,7 @@ class MetadataEnricher:
             # Indexing timestamp
             # ----------------------------------------------------------------
             now = datetime.now(timezone.utc)
-            meta["indexed_at"]    = now.isoformat()
+            meta["indexed_at"] = now.isoformat()
             meta["indexed_at_ts"] = int(now.timestamp())  # Unix epoch for range filters
 
             # ----------------------------------------------------------------
@@ -125,7 +103,7 @@ class MetadataEnricher:
             # Document beginning — passed to ContentAnalyzer for the contextual
             # prefix LLM call, then stripped before writing to Qdrant.
             # ----------------------------------------------------------------
-            meta["doc_beginning"] = content[:self.doc_beginning_chars]
+            meta["doc_beginning"] = content[: self.doc_beginning_chars]
 
             # ----------------------------------------------------------------
             # Embedding provenance (inherited by every chunk after split)
@@ -156,6 +134,7 @@ class MetadataEnricher:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _extract_title(content: str, source: str) -> str:
     """Return the first H1 heading found in the markdown, or derive a title from the filename.
 
@@ -167,7 +146,7 @@ def _extract_title(content: str, source: str) -> str:
         Title string — never empty, falls back to ``"Untitled"`` as last resort.
     """
     for match in _HEADING_RE.finditer(content):
-        if len(match.group(1)) == 1:          # exactly one '#' → H1
+        if len(match.group(1)) == 1:  # exactly one '#' → H1
             return match.group(2).strip()
 
     # Fallback: strip extension from source filename

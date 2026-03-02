@@ -154,7 +154,7 @@ Runs one LLM call per chunk (in parallel via `ThreadPoolExecutor`) to generate:
 - **`summary`** — 2-3 sentence abstractive summary
 - **`keywords`** — 5-10 key terms
 - **`classification`** — one label from `CLASSIFICATION_TAXONOMY` in `.env`
-- **`entities`** — structured dict with organizations, persons, locations, dates, technologies, monetary_amounts
+- **`entities`** — structured dict with persons, organizations, locations, dates, products, laws_and_standards, events, quantities (OntoNotes 5 / spaCy standard)
 
 **Input/Output:** `documents: list[Document]`
 

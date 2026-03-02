@@ -5,7 +5,7 @@ from haystack.components.writers import DocumentWriter
 from haystack.document_stores.types import DuplicatePolicy
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
-from components.chunk_context_enricher import ChunkContextEnricher
+from components.chunk_enricher import ChunkEnricher
 from components.content_analyzer import ContentAnalyzer
 from components.docling_converter import DoclingConverter
 from components.metadata_enricher import MetadataEnricher
@@ -75,7 +75,7 @@ def build_indexing_pipeline(
     )
 
     # --- Stage 6: chunk-level structural metadata ---
-    chunk_enricher = ChunkContextEnricher()
+    chunk_enricher = ChunkEnricher()
 
     # --- Stage 7: contextual prefix + semantic metadata (one LLM call/chunk) ---
     analyzer = ContentAnalyzer(
@@ -83,7 +83,7 @@ def build_indexing_pipeline(
         llm_model=settings.llm_model,
         openai_url=settings.openai_url,
         taxonomy=settings.classification_taxonomy,
-        max_workers=settings.analyzer_max_workers,
+        max_concurrency=settings.analyzer_max_concurrency,
         max_chars=settings.analyzer_max_chars,
         doc_beginning_chars=settings.doc_beginning_chars,
     )
@@ -96,7 +96,7 @@ def build_indexing_pipeline(
             openai_api_key=settings.openai_api_key,
             llm_model=settings.llm_model,
             openai_url=settings.openai_url,
-            max_workers=settings.analyzer_max_workers,
+            max_workers=settings.analyzer_max_concurrency,
         )
 
     # --- Stage 9: dense embedding ---

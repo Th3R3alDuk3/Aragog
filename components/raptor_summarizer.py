@@ -1,50 +1,11 @@
-"""
-RaptorSummarizer — Haystack 2.x custom component.
-
-Simplified RAPTOR (Recursive Abstractive Processing for Tree-Organized Retrieval).
-
-Standard RAPTOR builds a tree by iteratively clustering and summarising chunks.
-This implementation uses the existing markdown section structure produced by
-``MarkdownHeaderSplitter`` as the natural grouping — no clustering needed.
-
-What it produces
-────────────────
-For each indexed document the component adds two levels of summary chunks
-*on top of* the original child chunks:
-
-  Level 0 (normal chunks)     ← produced upstream, passed through unchanged
-  Level 1 (raptor_section)    ← one LLM-synthesised summary per H1/H2 section
-  Level 2 (raptor_doc)        ← one LLM-synthesised document overview
-
-All three levels are embedded and written to Qdrant alongside each other.
-At query time the retrievers search the full collection — short child chunks
-give precise retrieval while RAPTOR sections/docs give broad conceptual recall.
-
-Pipeline placement
-──────────────────
-Inserted **after** ContentAnalyzer (so ``meta["summary"]`` is available per chunk)
-and **before** DenseEmbedder.  The summariser emits the original docs PLUS new
-RAPTOR docs; both batches flow through the rest of the pipeline unchanged.
-
-RAPTOR summaries re-use the per-chunk ``meta["summary"]`` strings as input —
-no extra LLM call reads the raw chunk text — keeping cost proportional to
-existing ContentAnalyzer usage.
-
-Stable IDs
-──────────
-RAPTOR chunk IDs are SHA-256 hashes of (doc_id + suffix) so re-indexing the
-same document with RAPTOR enabled always produces the same IDs and the
-Qdrant OVERWRITE policy deduplicates correctly.
-"""
-
-import hashlib
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from hashlib import sha256
+from logging import getLogger
 from typing import Any
 
 from haystack import Document, component
 
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 
 _SECTION_SYSTEM = (
     "You are a precise document summarisation assistant. "
@@ -77,7 +38,7 @@ Section summaries:
 
 
 def _stable_id(doc_id: str, suffix: str) -> str:
-    return hashlib.sha256(f"{doc_id}::{suffix}".encode()).hexdigest()
+    return sha256(f"{doc_id}::{suffix}".encode()).hexdigest()
 
 
 @component
