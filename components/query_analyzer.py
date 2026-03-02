@@ -8,10 +8,28 @@ logger = getLogger(__name__)
 
 _SYSTEM = (
     "You are a query analysis assistant. "
-    "Extract sub-questions and metadata filters from the user query. "
-    "Only split on genuinely independent information needs; for a single question set is_compound=false and sub_questions to [original query]. "
-    "Only set filter values when clearly stated — never guess. "
-    "Preserve the original language of the query in sub_questions."
+    "Extract sub-questions and metadata filters from the user query.\n"
+    "Sub-question rules:\n"
+    "  - Split whenever the query asks for two or more pieces of information that could realistically "
+    "appear in different document sections — even if they concern the same entity.\n"
+    "  - Examples that SHOULD be split:\n"
+    "      'What are the main risks and what are the revenue figures?' → ['What are the main risks?', 'What are the revenue figures?']\n"
+    "      'Who are the main characters and what are their traits?' → ['Who are the main characters?', 'What are the traits of the main characters?']\n"
+    "      'When was the company founded and what are its products?' → ['When was the company founded?', 'What are the products of the company?']\n"
+    "  - Examples that should NOT be split:\n"
+    "      'Who is the CEO of ACME?' → ['Who is the CEO of ACME?']\n"
+    "      'What happened in chapter 3?' → ['What happened in chapter 3?']\n"
+    "  - Each sub-question MUST be fully self-contained and standalone: replace all pronouns and "
+    "references ('their', 'its', 'sie', 'ihre', 'deren', 'es', 'seine') with the explicit noun from the original query.\n"
+    "  - Set is_compound=true whenever you produce more than one sub-question.\n"
+    "  - Preserve the original language of the query in sub_questions.\n"
+    "Filter rules:\n"
+    "  - Only set date_from / date_to when a time range is explicitly mentioned.\n"
+    "  - Only set classification when a document type is explicitly named.\n"
+    "  - Only set language when the user explicitly asks for documents in a specific language "
+    "(e.g. 'only German documents'). Never infer language from the language the query is written in.\n"
+    "  - Only set source when a specific filename is explicitly mentioned.\n"
+    "  - Never guess — leave fields null when uncertain."
 )
 
 
@@ -39,7 +57,11 @@ class AnalysisResult(BaseModel):
     )
     language: str | None = Field(
         default=None,
-        description="ISO 639-1 language code, lowercase (e.g. 'de', 'en').",
+        description=(
+            "ISO 639-1 language code (e.g. 'de', 'en'). "
+            "Set ONLY when the user explicitly asks for documents in a specific language. "
+            "Never infer from the language the query is written in."
+        ),
     )
     source: str | None = Field(
         default=None,

@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
     query_analyzer = QueryAnalyzer(
         openai_url=settings.openai_url,
         openai_api_key=settings.openai_api_key,
-        llm_model=settings.llm_model,
+        llm_model=settings.effective_instruct_model,
         taxonomy=settings.classification_taxonomy,
     )
 
@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
         hyde_generator = HyDEGenerator(
             openai_url=settings.openai_url,
             openai_api_key=settings.openai_api_key,
-            llm_model=settings.llm_model,
+            llm_model=settings.effective_instruct_model,
         )
 
         logger.info("HyDE enabled (model: %s)", settings.llm_model)

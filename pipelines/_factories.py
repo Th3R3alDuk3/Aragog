@@ -129,18 +129,10 @@ def build_reranker(settings: Settings) -> SentenceTransformersSimilarityRanker:
 # ---------------------------------------------------------------------------
 
 def build_generator(settings: Settings) -> OpenAIGenerator:
-    """
-    OpenAI-compatible text generator.
-
-    Set ``OPENAI_URL`` in .env to use a different backend:
-      Ollama  → http://localhost:11434/v1
-      vLLM    → http://localhost:8000/v1
-      Groq    → https://api.groq.com/openai/v1
-    """
-    kwargs: dict = {
-        "api_key": Secret.from_token(settings.openai_api_key),
-        "model":   settings.llm_model,
-    }
-    if settings.openai_url:
-        kwargs["api_base_url"] = settings.openai_url
-    return OpenAIGenerator(**kwargs)
+    """OpenAI-compatible text generator."""
+    return OpenAIGenerator(
+        api_base_url=settings.openai_url,
+        api_key=Secret.from_token(settings.openai_api_key),
+        model=settings.llm_model,
+        timeout=settings.llm_timeout
+    )

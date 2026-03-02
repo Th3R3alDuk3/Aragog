@@ -96,12 +96,17 @@ class ColBERTReranker:
             show_progress_bar = False,
         )
 
-        # rank.rerank returns list[list[dict]] — one list per query
-        # Each dict has keys "id" (0-based doc index) and "score"
+        # rank.rerank expects nested lists — one inner list per query.
+        # Each result dict has keys "id" (0-based doc index) and "score".
         ranked = rank.rerank(
-            documents_ids       = list(range(len(documents))),
-            queries_embeddings  = query_embeddings,
-            documents_embeddings= doc_embeddings,
+            documents_ids        = [list(range(len(documents)))],
+            queries_embeddings   = query_embeddings,
+            documents_embeddings = [doc_embeddings],
         )
-        ranked_indices = [entry["id"] for entry in ranked[0]]
-        return [documents[i] for i in ranked_indices][: self.top_k]
+        n_tokens = max(len(query_embeddings[0]), 1)
+        result = []
+        for entry in ranked[0][: self.top_k]:
+            doc = documents[entry["id"]]
+            doc.score = min(1.0, max(0.0, entry["score"] / n_tokens))
+            result.append(doc)
+        return result

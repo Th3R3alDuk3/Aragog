@@ -320,7 +320,7 @@ async def run_retrieval(
     """Run the hybrid retrieval pipeline asynchronously."""
     if use_hyde and hyde_generator is not None:
         dense_text = await hyde_generator.generate(sub_q)
-        logger.info("  HyDE: hypothetical doc generated (%d chars)", len(dense_text))
+        logger.info("  HyDE: hypothetical doc generated (%d chars): %s", len(dense_text), dense_text[:300])
     else:
         dense_text = sub_q
 
@@ -381,7 +381,7 @@ async def prepare_context(
     # 1. Analyze: decompose + extract metadata filters
     analysis      = await analyzer.analyze(request.query)
     sub_questions = analysis.sub_questions
-    is_compound   = len(sub_questions) > 1
+    is_compound   = analysis.is_compound
     logger.info(
         "Analyze  → compound=%s | sub_questions=%d: %s",
         is_compound, len(sub_questions), sub_questions,

@@ -31,12 +31,23 @@ class Settings(BaseSettings):
     docling_url: str = "http://localhost:5001/ui"
 
     # -------------------------------------------------------------------------
-    # LLM  (OpenAI-compatible — used for generation, indexing, HyDE, RAPTOR)
+    # LLM  (OpenAI-compatible endpoint — shared base URL + API key)
     # -------------------------------------------------------------------------
 
     openai_url: str = "http://localhost:11434/v1"
     openai_api_key: str = ""
+
+    # Final answer generation, HyDE, RAGAS evaluation — quality matters
     llm_model: str = "qwen3:14b"
+    llm_timeout: int = 120  # seconds; increase for slow/thinking models
+
+    # Structured extraction tasks (ContentAnalyzer, RAPTOR, QueryAnalyzer)
+    # — small, fast, no-think; falls back to llm_model if not set
+    instruct_llm_model: str = ""
+
+    @property
+    def effective_instruct_model(self) -> str:
+        return self.instruct_llm_model or self.llm_model
 
     # -------------------------------------------------------------------------
     # Indexing
@@ -94,7 +105,7 @@ class Settings(BaseSettings):
 
     # --- CRAG (corrective re-retrieval on low confidence) ---
     crag_enabled: bool = True
-    crag_score_threshold: float = 0.4
+    crag_score_threshold: float = 0.35
     crag_max_retries: int = 2
 
     # -------------------------------------------------------------------------

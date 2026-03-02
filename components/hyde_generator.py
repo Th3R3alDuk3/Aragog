@@ -12,7 +12,7 @@ _SYSTEM = (
 
 
 _PROMPT = """\
-Write a short factual document passage (3-5 sentences) that would directly \
+Write a short factual document passage (2-3 sentences) that would directly \
 answer the following question. Write as if excerpted from a knowledge base or \
 reference document. Do NOT reference the question. Do NOT add a title or \
 preamble — start directly with the content.
@@ -85,7 +85,7 @@ class HyDEGenerator:
                 {"role": "system", "content": _SYSTEM},
                 {"role": "user",   "content": _PROMPT.format(query=query)},
             ],
-            temperature=0.5, # slight variation helps diversity
-            max_tokens=300,
+            temperature=0.5,
+            max_tokens=150,
         )
         return response.choices[0].message.content or ""
