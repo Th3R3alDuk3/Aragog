@@ -67,10 +67,9 @@ async def query_stream(
 
     sources_payload = [source.model_dump() for source in sources]
 
-    prompt_text = (
-        Environment()
-        .from_string(RAG_PROMPT)
-        .render(documents=ctx.merged_docs, questions=ctx.sub_questions),
+    prompt_text = Environment().from_string(RAG_PROMPT).render(
+        documents=ctx.merged_docs, 
+        questions=ctx.sub_questions,
     )
 
     return EventSourceResponse(

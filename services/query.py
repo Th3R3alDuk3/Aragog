@@ -66,9 +66,14 @@ def _is_scalar_filter_value(value: Any) -> bool:
 
 def _normalize_filter_fields(f: dict) -> dict:
     """Recursively ensure all metadata field names carry the ``meta.`` prefix."""
+    if not isinstance(f, dict):
+        return f
     operator = f.get("operator")
     if operator in _LOGICAL_OPERATORS:
-        return {**f, "conditions": [_normalize_filter_fields(c) for c in f.get("conditions", [])]}
+        conditions = f.get("conditions", [])
+        if not isinstance(conditions, list):
+            return f
+        return {**f, "conditions": [_normalize_filter_fields(c) for c in conditions]}
     field = f.get("field", "")
     if field and not field.startswith("meta.") and field not in _BARE_FIELDS:
         return {**f, "field": f"meta.{field}"}

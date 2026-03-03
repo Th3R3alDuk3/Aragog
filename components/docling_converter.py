@@ -141,7 +141,7 @@ class DoclingConverter:
         logger.debug("DoclingConverter: submitted '%s' → task_id=%s", file_name, task_id)
 
         if not task_id:
-            logger.warning("DoclingConverter: empty task_id for '%s'", filenfile_nameame)
+            logger.warning("DoclingConverter: empty task_id for '%s'", file_name)
             return None
 
         # ── Step 2: wait ──────────────────────────────────────────────────

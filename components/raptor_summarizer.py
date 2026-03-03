@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import sha256
 from logging import getLogger
-from typing import Any
 
 from haystack import Document, component
 
@@ -60,10 +59,13 @@ class RaptorSummarizer:
         openai_url: str = "",
         max_workers: int = 4,
     ) -> None:
-        self._api_key      = openai_api_key
-        self._llm_model    = llm_model
-        self._base_url     = openai_url or None
-        self._max_workers  = max_workers
+        from openai import OpenAI
+        self._llm_model   = llm_model
+        self._max_workers = max_workers
+        client_kwargs: dict = {"api_key": openai_api_key}
+        if openai_url:
+            client_kwargs["base_url"] = openai_url
+        self._client = OpenAI(**client_kwargs)
 
     # ------------------------------------------------------------------
 
@@ -193,12 +195,7 @@ class RaptorSummarizer:
         return result
 
     def _call_llm(self, prompt: str) -> str:
-        from openai import OpenAI
-        client_kwargs: dict[str, Any] = {"api_key": self._api_key}
-        if self._base_url:
-            client_kwargs["base_url"] = self._base_url
-        client = OpenAI(**client_kwargs)
-        response = client.chat.completions.create(
+        response = self._client.chat.completions.create(
             model    = self._llm_model,
             messages = [
                 {"role": "system", "content": _SECTION_SYSTEM},

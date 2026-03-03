@@ -243,13 +243,24 @@ at a small quality cost (English only).
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| CRAG (Corrective RAG) | ✅ | Implemented as optional query reformulation retry loop (score-threshold based). No web-search fallback yet. |
-| Streaming responses | ✅ | Implemented via SSE endpoint (`POST /query/stream`) with `token`, `sources`, `done` events. |
-| Self-RAG | ❌ | LLM self-evaluation of retrieved docs |
+| Hybrid retrieval (dense + sparse + RRF) | ✅ | BAAI/bge-m3 dense + BM42 sparse → RRF fusion |
+| Cross-encoder reranking | ✅ | BAAI/bge-reranker-v2-m3, local, applied to top-K RRF candidates |
+| ColBERT second-pass reranker | ✅ | colbert-ir/colbertv2.0 via pylate, optional (`COLBERT_ENABLED`) |
+| HyDE (Hypothetical Document Embeddings) | ✅ | Adds second dense branch in retrieval pipeline (`HYDE_ENABLED`) |
+| RAPTOR (multi-level summaries) | ✅ | Section + doc-level summary chunks, ThreadPoolExecutor (`RAPTOR_ENABLED`) |
+| CRAG (Corrective RAG) | ✅ | Score-threshold retry loop + LLM query reformulation (`CRAG_ENABLED`) |
+| Streaming responses (SSE) | ✅ | `POST /query/stream` — `token`, `sources`, `done` events |
+| RAGAS evaluation | ✅ | Faithfulness, answer_relevancy, context_precision (`RAGAS_ENABLED`) |
+| MinIO object storage | ✅ | Stores original files; `minio_url` + `minio_key` in chunk metadata |
+| Async task tracking | ✅ | HTTP 202 + GET /tasks/{task_id}; BoundedTaskStore evicts done/failed |
+| Re-indexing lifecycle | ✅ | Deletes stale chunks by `meta.source` before writing fresh chunks |
+| Metadata filter robustness | ✅ | NL filter extraction via QueryAnalyzer; `meta.` prefix normalization; shorthand dict support |
+| Named Entity Recognition | ✅ | 8 entity types (persons, orgs, locations, dates, products, laws, events, quantities) via ContentAnalyzer |
+| Self-RAG | ❌ | LLM self-evaluation of retrieved docs before generation |
 | Graph RAG | ❌ | Knowledge graph for entity-relationship queries |
-| SPLADE multilingual | ⚠️ | BM42 is an approximation; true multilingual SPLADE TBD |
-| Re-indexing lifecycle | ✅ | Router deletes stale chunks by `meta.source` before indexing and then writes fresh chunks (plus optional MinIO object metadata). |
-| Metadata filter robustness | ✅ | Filter fields are normalized to `meta.<field>` in the query router; `source` extraction is constrained to exact filenames for `==` matching. |
-| Async pipeline execution | ⚠️ | Haystack pipelines are sync; runs in thread pool |
+| Multi-modal (image/table extraction) | ⚠️ | docling extracts tables as markdown; images → placeholder text |
+| SPLADE multilingual | ⚠️ | BM42 is an approximation; true multilingual SPLADE pending |
 | HierarchicalDocumentSplitter | ⚠️ | Future: replace ParentChildSplitter + swap_to_parent_content with Haystack built-ins |
-| End-to-end test coverage | ⚠️ | Unit coverage exists for components/router helpers/pipeline helpers, but full integration tests with real Qdrant + LLM backend are still pending. |
+| Async pipeline execution | ⚠️ | Indexing components are sync; run in thread-pool executor |
+| Query result caching | ❌ | No Redis/in-memory cache for repeated identical queries |
+| End-to-end test coverage | ⚠️ | Integration tests with real Qdrant + LLM backend pending |
