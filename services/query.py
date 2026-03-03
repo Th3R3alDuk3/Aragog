@@ -162,7 +162,7 @@ async def _reformulate_query(query: str, settings: Settings) -> str:
             client_kwargs["base_url"] = settings.openai_url
         client = AsyncOpenAI(**client_kwargs)
         response = await client.chat.completions.create(
-            model    = settings.llm_model,
+            model    = settings.effective_instruct_model,
             messages = [{
                 "role": "user",
                 "content": (
@@ -172,7 +172,7 @@ async def _reformulate_query(query: str, settings: Settings) -> str:
                 ),
             }],
             temperature = 0.3,
-            max_tokens  = 100,
+            max_tokens  = 150,
         )
         rephrased = (response.choices[0].message.content or "").strip()
         if rephrased:
@@ -269,15 +269,13 @@ async def retrieve_with_crag(
     sub_q: str,
     filters: dict | None,
     settings: Settings,
-    hyde_generator,
-    use_hyde: bool,
     attempt: int = 0,
 ) -> tuple[list, bool]:
     """
     Retrieval with CRAG retry loop.
     Returns (reranked_docs, low_confidence).
     """
-    docs      = await run_retrieval(pipeline, sub_q, filters, hyde_generator, use_hyde)
+    docs      = await run_retrieval(pipeline, sub_q, filters)
     top_score = (getattr(docs[0], "score", None) or 0.0) if docs else 0.0
     sufficient = top_score >= settings.crag_score_threshold
 
@@ -291,7 +289,7 @@ async def retrieve_with_crag(
 
     reformulated = await _reformulate_query(sub_q, settings)
     return await retrieve_with_crag(
-        pipeline, reformulated, filters, settings, hyde_generator, use_hyde, attempt + 1,
+        pipeline, reformulated, filters, settings, attempt + 1,
     )
 
 
@@ -314,24 +312,22 @@ async def run_retrieval(
     pipeline,
     sub_q: str,
     filters: dict | None,
-    hyde_generator,
-    use_hyde: bool,
 ) -> list:
     """Run the hybrid retrieval pipeline asynchronously."""
-    if use_hyde and hyde_generator is not None:
-        dense_text = await hyde_generator.generate(sub_q)
-        logger.info("  HyDE: hypothetical doc generated (%d chars): %s", len(dense_text), dense_text[:300])
-    else:
-        dense_text = sub_q
-
     run_input: dict = {
-        "dense_embedder":  {"text": dense_text},
+        "dense_embedder":  {"text": sub_q},
         "sparse_embedder": {"text": sub_q},
         "reranker":        {"query": sub_q},
     }
+
+    if "hyde_generator" in pipeline.graph.nodes:
+        run_input["hyde_generator"] = {"query": sub_q}
+
     if filters:
         run_input["dense_retriever"]  = {"filters": filters}
         run_input["sparse_retriever"] = {"filters": filters}
+        if "dense_retriever_hyde" in pipeline.graph.nodes:
+            run_input["dense_retriever_hyde"] = {"filters": filters}
     if "colbert_reranker" in pipeline.graph.nodes:
         run_input["colbert_reranker"] = {"query": sub_q}
 
@@ -367,12 +363,12 @@ async def prepare_context(
     settings: Settings,
     pipeline,
     analyzer: QueryAnalyzer,
-    hyde_generator,
 ) -> QueryContext:
     """
     Full retrieval phase: analyze → build filters → retrieve per sub-question
     → deduplicate → parent-content swap → top_k cut.
-    ColBERT second-pass reranking (if enabled) runs inside the pipeline.
+    HyDE, ColBERT second-pass reranking, and CRAG are all controlled via
+    .env flags; their logic runs inside the pipeline or service layer.
 
     Raises:
         ValueError       — invalid filter expression in request.filters
@@ -389,8 +385,8 @@ async def prepare_context(
 
     # 2. Build merged filter set (raises ValueError on invalid filters)
     filters  = build_filters(request, analysis)
-    use_hyde = settings.hyde_enabled or request.use_hyde
-    logger.info("Filters  → %s | HyDE=%s", filters or "none", use_hyde)
+    has_hyde = "hyde_generator" in pipeline.graph.nodes
+    logger.info("Filters  → %s | HyDE=%s", filters or "none", has_hyde)
 
     # 3. Retrieve per sub-question, deduplicate by doc.id
     all_docs_by_id: dict[str, Any] = {}
@@ -405,11 +401,11 @@ async def prepare_context(
         try:
             if settings.crag_enabled:
                 docs, lc = await retrieve_with_crag(
-                    pipeline, sub_q, filters, settings, hyde_generator, use_hyde,
+                    pipeline, sub_q, filters, settings,
                 )
                 low_confidence = low_confidence or lc
             else:
-                docs = await run_retrieval(pipeline, sub_q, filters, hyde_generator, use_hyde)
+                docs = await run_retrieval(pipeline, sub_q, filters)
         except Exception as exc:
             raise RetrievalError(f"Retrieval failed for '{sub_q}': {exc}") from exc
 
@@ -418,9 +414,11 @@ async def prepare_context(
                 all_docs_by_id[doc.id] = doc
 
     # 4. Parent-content swap; budget keeps evidence per sub-question
+    # Sort by score descending so the highest-scoring child wins parent dedup
     candidate_budget = request.top_k * max(1, len(sub_questions))
     before_swap      = len(all_docs_by_id)
-    merged_docs      = swap_to_parent_content(list(all_docs_by_id.values()))
+    sorted_docs      = sorted(all_docs_by_id.values(), key=lambda d: getattr(d, "score", 0.0) or 0.0, reverse=True)
+    merged_docs      = swap_to_parent_content(sorted_docs)
     merged_docs      = merged_docs[:candidate_budget]
     logger.info(
         "Parent   → %d merged → %d unique sections (budget=%d)",

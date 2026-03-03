@@ -47,11 +47,6 @@ def get_query_analyzer(request: Request) -> QueryAnalyzer:
     return request.app.state.query_analyzer
 
 
-def get_hyde_generator(request: Request):
-    """None if HYDE_ENABLED=false."""
-    return request.app.state.hyde_generator
-
-
 def get_retrieval_pipeline(request: Request) -> AsyncPipeline:
     return request.app.state.retrieval_pipeline
 

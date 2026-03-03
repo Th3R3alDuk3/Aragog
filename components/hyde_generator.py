@@ -1,34 +1,38 @@
 from logging import getLogger
 
-from openai import AsyncOpenAI
+from haystack import component
+from openai import OpenAI
 
 logger = getLogger(__name__)
 
 
-_SYSTEM = (
-    "You are a document retrieval assistant. "
-    "You write short, factual passages in declarative style."
-)
-
-
 _PROMPT = """\
-Write a short factual document passage (2-3 sentences) that would directly \
-answer the following question. Write as if excerpted from a knowledge base or \
-reference document. Do NOT reference the question. Do NOT add a title or \
-preamble — start directly with the content.
+Please write a passage to answer the question. \
+Try to include as many key details as possible. \
+Do NOT add a title or preamble — start directly with the content.
 
 Question: {query}
-"""
+Passage:"""
 
 
+@component
 class HyDEGenerator:
     """
-    Generates a hypothetical document for improved dense retrieval (HyDE).
+    Haystack component that generates a hypothetical document for improved
+    dense retrieval (HyDE — Hypothetical Document Embeddings, Gao et al. 2022).
+
+    At query time the LLM produces a short declarative passage that would
+    answer the question.  Its embedding is used for the second dense-retrieval
+    branch; the original query text is still used by the sparse retriever and
+    the reranker.
+
+    Falls back silently to the original query text on any LLM error so that
+    retrieval continues normally without disruption.
 
     Args:
-        openai_url: Custom base URL (empty = official OpenAI API).
-        openai_api_key:  API key for the LLM endpoint.
-        llm_model:       OpenAI-compatible model name.
+        openai_url:     Custom base URL (empty = official OpenAI API).
+        openai_api_key: API key for the LLM endpoint.
+        llm_model:      OpenAI-compatible model name.
     """
 
     def __init__(
@@ -37,55 +41,34 @@ class HyDEGenerator:
         openai_api_key: str,
         llm_model: str,
     ) -> None:
-
-        self._client    = AsyncOpenAI(
-            base_url=openai_url, 
+        self._client    = OpenAI(
+            base_url=openai_url,
             api_key=openai_api_key,
         )
-
         self._llm_model = llm_model
 
-    async def generate(self, query: str) -> str:
-        """Generate a hypothetical document passage for the given query.
+    @component.output_types(text=str)
+    def run(self, query: str) -> dict:
+        """Generate a hypothetical passage for *query* and return it as ``text``.
 
-        The generated text is intended for dense embedding only; sparse retrieval
-        and the reranker always receive the original query unchanged.
-
-        Falls back to the original query on any LLM error so that retrieval
-        continues normally without disruption.
-
-        Args:
-            query: The user query to generate a hypothetical document for.
-
-        Returns:
-            A short declarative passage (3-5 sentences) that would answer the
-            query, or the original query string if generation fails.
+        Falls back to the original query on any LLM error.
+        Haystack's AsyncPipeline runs sync components in a thread executor,
+        so blocking here is safe.
         """
         try:
-            result = await self._call_llm(query)
-            if stripped_result := result.strip():
-                logger.debug("HyDE: generated hypothetical doc (%d chars)", len(result))
-                return stripped_result
+            response = self._client.chat.completions.create(
+                model=self._llm_model,
+                messages=[{"role": "user", "content": _PROMPT.format(query=query)}],
+                temperature=0.5,
+                max_tokens=250,
+            )
+            text = (response.choices[0].message.content or "").strip()
+            if text:
+                logger.info(
+                    "  HyDE: hypothetical doc generated (%d chars): %s",
+                    len(text), text[:300],
+                )
+                return {"text": text}
         except Exception as error:
             logger.warning("HyDE: LLM call failed (%s), falling back to original query", error)
-        return query
-
-    async def _call_llm(self, query: str) -> str:
-        """Call the LLM to produce a hypothetical document passage.
-
-        Args:
-            query: The user query.
-
-        Returns:
-            The raw LLM response text (may be empty).
-        """
-        response = await self._client.chat.completions.create(
-            model=self._llm_model,
-            messages=[
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user",   "content": _PROMPT.format(query=query)},
-            ],
-            temperature=0.5,
-            max_tokens=150,
-        )
-        return response.choices[0].message.content or ""
+        return {"text": query}

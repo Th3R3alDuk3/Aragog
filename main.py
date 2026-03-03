@@ -86,20 +86,8 @@ async def lifespan(app: FastAPI):
         taxonomy=settings.classification_taxonomy,
     )
 
-    # HyDE: optional — only instantiated when HYDE_ENABLED=true.
-
-    hyde_generator = None
-
     if settings.hyde_enabled:
-        from components.hyde_generator import HyDEGenerator
-
-        hyde_generator = HyDEGenerator(
-            openai_url=settings.openai_url,
-            openai_api_key=settings.openai_api_key,
-            llm_model=settings.effective_instruct_model,
-        )
-
-        logger.info("HyDE enabled (model: %s)", settings.llm_model)
+        logger.info("HyDE enabled (model: %s)", settings.effective_instruct_model)
 
     app.state.settings = settings
     app.state.document_store = document_store
@@ -109,7 +97,6 @@ async def lifespan(app: FastAPI):
     app.state.generation_pipeline = generation_pipeline
     app.state.minio_store = minio_store
     app.state.query_analyzer = query_analyzer
-    app.state.hyde_generator = hyde_generator
     app.state.tasks = BoundedTaskStore(settings.task_store_size)
 
     yield

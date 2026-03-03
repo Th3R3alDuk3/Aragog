@@ -54,8 +54,6 @@ async def run_evaluation(
                 retrieval_pipeline,
                 sample.question,
                 None,   # no filters for evaluation
-                None,   # no HyDE generator
-                False,  # use_hyde=False
             )
             docs = swap_to_parent_content(docs)[: request.top_k]
 

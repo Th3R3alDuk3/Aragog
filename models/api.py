@@ -63,15 +63,6 @@ class QueryRequest(BaseModel):
             "The end of that day (23:59:59 UTC) is used so the whole day is included."
         ),
     )
-    use_hyde: bool = Field(
-        default=False,
-        description=(
-            "Enable HyDE (Hypothetical Document Embedding) for this request. "
-            "The LLM generates a hypothetical document before dense retrieval, "
-            "improving recall for queries phrased differently from document style. "
-            "Also enabled globally via HYDE_ENABLED=true in .env."
-        ),
-    )
 
 
 class SourceDocument(BaseModel):

@@ -3,13 +3,11 @@ from logging import getLogger
 from fastapi import APIRouter, Depends, HTTPException, status
 from haystack.core.pipeline.async_pipeline import AsyncPipeline
 
-from components.hyde_generator import HyDEGenerator
 from components.query_analyzer import QueryAnalyzer
 from config import Settings
 from models.api import QueryRequest, QueryResponse
 from routers._deps import (
     get_generation_pipeline,
-    get_hyde_generator,
     get_query_analyzer,
     get_retrieval_pipeline,
     get_settings,
@@ -40,7 +38,6 @@ async def query_rag(
     retrieval_pipeline: AsyncPipeline = Depends(get_retrieval_pipeline),
     generation_pipeline: AsyncPipeline = Depends(get_generation_pipeline),
     query_analyzer: QueryAnalyzer = Depends(get_query_analyzer),
-    hyde_generator: HyDEGenerator | None = Depends(get_hyde_generator),
 ) -> QueryResponse:
 
     logger.info("── QUERY ─────────────────────────────────────────────────────")
@@ -52,7 +49,6 @@ async def query_rag(
             settings,
             retrieval_pipeline,
             query_analyzer,
-            hyde_generator,
         )
     except ValueError as error:
         raise HTTPException(
