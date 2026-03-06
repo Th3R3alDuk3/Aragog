@@ -59,9 +59,11 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 │                                        │
 │  DocumentJoiner  (Reciprocal Rank Fusion)
 │      │
-│  swap_to_parent_content()  ← replace child with full section
+│  ColBERTReranker  (colbert-ir/colbertv2.0, optional)  ← fast pre-filter → top 20
 │      │
-│  SentenceTransformersSimilarityRanker  (BAAI/bge-reranker-v2-m3, local)
+│  SentenceTransformersSimilarityRanker  (BAAI/bge-reranker-v2-m3, local)  ← final → top 5
+│      │
+│  swap_to_parent_content()  ← replace child chunks with full section text
 │      │
 │  PromptBuilder  (multi-question aware Jinja2 template)
 │      │
@@ -85,8 +87,8 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 | Dense embeddings | **BAAI/bge-m3** | Multilingual, 1024 dim, state of the art (local) |
 | Sparse embeddings | **BM42 / SPLADE** | Learned sparse > BM25 for semantic keyword matching |
 | Hybrid fusion | **RRF** | Reciprocal Rank Fusion — no score normalisation needed |
-| Reranker (pass 1) | **BAAI/bge-reranker-v2-m3** | Multilingual cross-encoder, state of the art (local) |
-| Reranker (pass 2) | **ColBERT** (colbert-ir/colbertv2.0) | Late-interaction, token-level precision (optional) |
+| Reranker (pass 1) | **ColBERT** (colbert-ir/colbertv2.0) | Fast late-interaction pre-filter, top 20 (optional) |
+| Reranker (pass 2) | **BAAI/bge-reranker-v2-m3** | Precise cross-encoder final ranking, top 5 (local) |
 | LLM | **OpenAI-compatible** | Works with OpenAI, Ollama, vLLM, Groq, … |
 | Contextual chunking | **Anthropic Option A** | Contextual prefix + parent-child + heading-aware split |
 | Multi-question | **QueryAnalyzer** | LLM detects compound queries + extracts metadata filters, retrieves per sub-question |
@@ -255,11 +257,11 @@ RAG/
 │   ├── content_analyzer.py      ← LLM: context_prefix + summary + keywords + NER
 │   ├── raptor_summarizer.py     ← RAPTOR section + doc-level summary chunks
 │   ├── hyde_generator.py        ← HyDE hypothetical document for dense retrieval
-│   ├── colbert_reranker.py      ← ColBERT late-interaction second-pass reranker
+│   ├── colbert_reranker.py      ← ColBERT late-interaction pre-filter (before cross-encoder)
 │   └── query_analyzer.py        ← multi-question decomposition + NL filter extraction
 ├── pipelines/
 │   ├── indexing.py        ← 11-stage DAG (converter → … → raptor → dense → sparse → write)
-│   ├── retrieval.py       ← dense + sparse + HyDE → RRF → cross-encoder → ColBERT
+│   ├── retrieval.py       ← dense + sparse + HyDE → RRF → ColBERT (pre-filter) → cross-encoder
 │   ├── generation.py      ← PromptBuilder (RAG_PROMPT) → OpenAIGenerator → AnswerBuilder
 │   └── _factories.py      ← HF dense/sparse embedders, cross-encoder reranker, LLM
 ├── routers/

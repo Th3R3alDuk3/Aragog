@@ -22,8 +22,9 @@ def build_retrieval_pipeline(
     """Build the hybrid retrieval pipeline.
 
     Combines dense and sparse retrievers via Reciprocal Rank Fusion, followed
-    by a cross-encoder reranker.  If ``COLBERT_ENABLED=true`` in settings, a
-    ColBERT second-pass reranker is wired after the cross-encoder.
+    by a cascade reranker.  If ``COLBERT_ENABLED=true`` in settings, ColBERT
+    runs first (fast late-interaction pre-filter), then the cross-encoder
+    reranker runs on the smaller ColBERT output for final precise ranking.
     Called once at startup; the returned pipeline is reused for every query.
 
     Args:
@@ -58,11 +59,10 @@ def build_retrieval_pipeline(
 
     # --- Stage 5: RRF fusion ---
     joiner = DocumentJoiner(
-        join_mode="reciprocal_rank_fusion",
-        top_k=max(settings.dense_retriever_top_k, settings.sparse_retriever_top_k),
+        join_mode="reciprocal_rank_fusion"
     )
 
-    # --- Stage 6: cross-encoder reranker ---
+    # --- Stage 6: cross-encoder reranker (final pass, sees ColBERT output) ---
     reranker = build_reranker(settings)
 
     # --- Stage 7 (optional): HyDE second dense branch ---
@@ -83,7 +83,7 @@ def build_retrieval_pipeline(
             top_k=settings.dense_retriever_top_k,
         )
 
-    # --- Stage 8 (optional): ColBERT late-interaction second-pass reranker ---
+    # --- Stage 8 (optional): ColBERT late-interaction pre-filter (before cross-encoder) ---
     colbert_reranker = None
     if settings.colbert_enabled:
         from components.colbert_reranker import ColBERTReranker
@@ -115,9 +115,11 @@ def build_retrieval_pipeline(
         retrieval.connect("hyde_generator.text",            "dense_embedder_hyde.text")
         retrieval.connect("dense_embedder_hyde.embedding",  "dense_retriever_hyde.query_embedding")
         retrieval.connect("dense_retriever_hyde.documents", "joiner.documents")
-    retrieval.connect("joiner.documents",                 "reranker.documents")
     if colbert_reranker is not None:
-        retrieval.connect("reranker.documents", "colbert_reranker.documents")
+        retrieval.connect("joiner.documents",              "colbert_reranker.documents")
+        retrieval.connect("colbert_reranker.documents",    "reranker.documents")
+    else:
+        retrieval.connect("joiner.documents",              "reranker.documents")
 
     return retrieval
 

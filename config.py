@@ -92,16 +92,16 @@ class Settings(BaseSettings):
     # --- HyDE (pre-retrieval: hypothetical document embedding) ---
     hyde_enabled: bool = True
 
-    # --- Reranker (cross-encoder, local) ---
-    reranker_model: str = "BAAI/bge-reranker-v2-m3"
-    reranker_top_k: int = 15
-    reranker_device: str = "cpu"
-
-    # --- ColBERT (late-interaction second pass after cross-encoder) ---
+    # --- ColBERT (late-interaction first-pass before cross-encoder) ---
     colbert_enabled: bool = True
     colbert_model: str = "colbert-ir/colbertv2.0"
-    colbert_top_k: int = 5
+    colbert_top_k: int = 20
     colbert_device: str = "cpu"
+
+    # --- Reranker (cross-encoder, local) ---
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_top_k: int = 5
+    reranker_device: str = "cpu"
 
     # --- CRAG (corrective re-retrieval on low confidence) ---
     crag_enabled: bool = True

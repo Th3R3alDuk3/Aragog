@@ -5,9 +5,9 @@ Full query pipeline:
   1. QueryAnalyzer    — decompose + extract metadata filters in one LLM call
   2. build_filters    — merge LLM-extracted hints + explicit request filters
   3. run_retrieval / retrieve_with_crag — retrieval with optional HyDE and CRAG
+     Pipeline order: RRF joiner → ColBERT pre-filter (optional) → cross-encoder reranker
   4. swap_to_parent_content — replace child chunks with full parent sections
-  5. ColBERT second-pass reranker (optional)
-  6. run_generation   — prompt_builder → LLM → answer_builder
+  5. run_generation   — prompt_builder → LLM → answer_builder
 
 Feature flags (controlled via .env):
   HYDE_ENABLED  — hypothetical document embedding for dense retrieval
@@ -337,7 +337,7 @@ async def run_retrieval(
         run_input["colbert_reranker"] = {"query": sub_q}
 
     result    = await pipeline.run_async(run_input)
-    docs      = (result.get("colbert_reranker") or result.get("reranker", {})).get("documents", [])
+    docs      = result.get("reranker", {}).get("documents", [])
     top_score = getattr(docs[0], "score", None) if docs else None
     logger.info(
         "  → %d doc(s) after reranking%s",

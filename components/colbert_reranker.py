@@ -48,12 +48,13 @@ class ColBERTReranker:
     def run(self, query: str, documents: list[Document]) -> dict[str, list[Document]]:
         """Re-score documents against the query using ColBERT late interaction.
 
-        Falls back to the cross-encoder input order on any error so the endpoint
+        Acts as a fast pre-filter (RRF output → top_k) before the cross-encoder
+        reranker.  Falls back to the input order on any error so the endpoint
         never fails due to a ColBERT issue.
 
         Args:
             query:     The user query string.
-            documents: Candidate documents from the upstream cross-encoder reranker.
+            documents: Candidate documents from the upstream RRF joiner.
 
         Returns:
             Dict with ``documents`` key — at most ``top_k`` docs sorted by ColBERT
