@@ -8,10 +8,11 @@ FastAPI route handlers and dependency injection for the Advanced Hybrid RAG API.
 
 | File | Prefix | Purpose |
 |------|--------|---------|
-| `documents.py` | `/documents` | Index documents |
+| `documents.py` | `/documents` | Index documents (async, HTTP 202) |
 | `query.py` | `/query` | RAG query (standard) |
 | `stream.py` | `/query` | RAG query (SSE streaming) |
 | `evaluation.py` | `/evaluation` | RAGAS evaluation |
+| `tasks.py` | `/tasks` | Task status polling |
 | `_deps.py` | — | FastAPI dependency providers |
 
 ---
@@ -32,8 +33,30 @@ Poll **GET /tasks/{task_id}** to track progress.
 
 **Pipeline stages (visible in `GET /tasks/{task_id}`):**
 `deleting_stale → uploading_minio → converting → enriching_metadata → cleaning
-→ splitting_headers → splitting_chunks → enriching_chunks → analyzing_content
+→ splitting_chunks → writing_parents → enriching_chunks → analyzing_content
 → [summarizing_raptor] → embedding_dense → embedding_sparse → writing → done`
+
+---
+
+### `GET /tasks/{task_id}`
+
+Poll an indexing task for its current status.
+
+**Response:**
+```json
+{
+  "task_id": "3fa85f64-...",
+  "status": "done",
+  "step": "done",
+  "source": "jahresbericht.pdf",
+  "created_at": "2025-01-01T10:00:00Z",
+  "updated_at": "2025-01-01T10:02:30Z",
+  "result": { "indexed": 42, "source": "jahresbericht.pdf", "minio_url": "http://..." },
+  "error": null
+}
+```
+
+`status` is one of `pending | running | done | failed`.
 
 ---
 
@@ -46,7 +69,6 @@ Standard RAG query — returns full response after generation completes.
 {
   "query": "What were the Q3 revenue figures and how does headcount compare to 2023?",
   "top_k": 5,
-  "use_hyde": false,
   "date_from": "2024-01-01",
   "date_to": "2024-12-31",
   "filters": {
@@ -61,7 +83,6 @@ Standard RAG query — returns full response after generation completes.
 |-------|------|---------|-------|
 | `query` | string | required | Natural language question (simple or compound) |
 | `top_k` | int | 5 | Max source documents in response (1-50) |
-| `use_hyde` | bool | false | Enable HyDE for this request only |
 | `date_from` | ISO date | null | Filter to docs indexed on or after this date |
 | `date_to` | ISO date | null | Filter to docs indexed on or before this date |
 | `filters` | Haystack filter | null | Arbitrary metadata filter (see `models/README.md`). `meta.<field>` is preferred; bare metadata fields are normalized automatically. |
@@ -102,23 +123,23 @@ Standard RAG query — returns full response after generation completes.
       → sub_questions (decomposition)
       → extracted filters (date, classification, language, source)
 
-2. _build_filters(request, analysis)
+2. build_filters(request, analysis)
       merge LLM-extracted + explicit request filters
       explicit request filters always win
 
 3. For each sub-question:
-      if CRAG_ENABLED:  _retrieve_with_crag()   # retry on low score
-      else:             _retrieve_simple()
+      if CRAG_ENABLED:  retrieve_with_crag()   # retry on low score
+      else:             run_retrieval()
 
-4. Merge retrieved docs (deduplicate by doc.id)
+   Retrieval pipeline order per sub-question:
+      dense + sparse + [HyDE dense] → RRF → AutoMergingRetriever
+      → [ColBERT pre-filter] → cross-encoder reranker
 
-5. swap_to_parent_content()  # child → parent section
+4. Merge retrieved docs across sub-questions (deduplicate by doc.id)
 
-6. if COLBERT_ENABLED: ColBERTReranker.rerank()
+5. Generate answer: prompt_builder → llm → answer_builder
 
-7. _run_generation_only()   # prompt_builder → llm → answer_builder
-
-8. Build QueryResponse
+6. Build QueryResponse
 ```
 
 ---
@@ -147,7 +168,7 @@ curl -X POST http://localhost:8000/query/stream \
   --no-buffer
 ```
 
-**Client example (JavaScript EventSource):**
+**Client example (JavaScript):**
 ```javascript
 const response = await fetch('/query/stream', {
   method: 'POST',
@@ -158,10 +179,10 @@ const reader = response.body.getReader();
 // read SSE events...
 ```
 
-**Implementation:** Retrieval runs synchronously via `asyncio.to_thread()`.
+**Implementation:** Retrieval runs via `prepare_context()` (same as `/query`).
 LLM generation uses `AsyncOpenAI.chat.completions.create(stream=True)`.
-The `RAG_PROMPT` Jinja2 template is imported from `pipelines/retrieval.py` and
-rendered with the standard `jinja2` library.
+The `RAG_PROMPT` Jinja2 template is imported from `pipelines/generation.py`
+and rendered with the standard `jinja2` library.
 
 ---
 
@@ -215,40 +236,31 @@ Returns HTTP 403 otherwise.
 
 ---
 
-### `GET /health`
-
-Liveness check. Returns HTTP 200 when the app is running and Qdrant is reachable.
-
-**Response:**
-```json
-{ "status": "ok", "document_store": "ok (1234 chunks)" }
-```
-
----
-
 ## `_deps.py` — Dependency Providers
 
-FastAPI dependency functions that fetch pipeline instances from `app.state`
+FastAPI dependency functions that fetch instances from `app.state`
 (populated at startup in `main.py`'s `lifespan` context manager).
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `get_document_store` | `QdrantDocumentStore` | |
-| `get_ingestion_pipeline` | `Pipeline` | |
-| `get_retrieval_pipeline` | `Pipeline` | |
-| `get_generation_pipeline` | `Pipeline` | Prompt/LLM/answer pipeline |
+| `get_settings` | `Settings` | |
+| `get_children_store` | `QdrantDocumentStore` | Children collection |
+| `get_parents_store` | `QdrantDocumentStore` | Parents collection |
+| `get_minio_store` | `MinioStore` | Original file storage |
+| `get_indexing_pipeline` | `AsyncPipeline` | |
+| `get_indexing_semaphore` | `Semaphore` | Concurrency limiter |
 | `get_query_analyzer` | `QueryAnalyzer` | |
-| `get_hyde_generator` | `HyDEGenerator \| None` | None when `HYDE_ENABLED=false` |
-| `get_colbert_reranker` | `ColBERTReranker \| None` | None when `COLBERT_ENABLED=false` |
-| `get_minio_store` | `MinioStore \| None` | None when MinIO is not configured |
+| `get_retrieval_pipeline` | `AsyncPipeline` | |
+| `get_generation_pipeline` | `AsyncPipeline` | |
+| `get_task_store` | `BoundedTaskStore` | Task tracking |
 
 ---
 
-## Filter Merging (`_build_filters`)
+## Filter Merging (`build_filters`)
 
 Filters from multiple sources are merged with `AND`:
 
-**Build order:**
+**Build order (later entries override earlier ones logically):**
 1. LLM-extracted date range (`analysis.date_from` / `date_to`) — only when request date fields are not set
 2. LLM-extracted metadata (`classification`, `language`, `source`; `source` is exact filename)
 3. Explicit `request.filters` (normalized to `meta.<field>` where needed)
@@ -261,11 +273,12 @@ If multiple: wrapped in `{"operator": "AND", "conditions": [...]}`.
 
 ## Feature Flags
 
-All features default to `false` and can be enabled independently:
+All features default to `true` and can be disabled independently:
 
 | Flag | Endpoint affected | Notes |
 |------|-------------------|-------|
-| `HYDE_ENABLED` | `/query`, `/query/stream` | Global HyDE; also per-request via `use_hyde` |
+| `HYDE_ENABLED` | `/query`, `/query/stream` | Second dense retrieval branch with hypothetical document |
 | `CRAG_ENABLED` | `/query`, `/query/stream` | Retry on low retrieval confidence |
-| `COLBERT_ENABLED` | `/query`, `/query/stream` | Second-pass ColBERT reranking |
+| `COLBERT_ENABLED` | `/query`, `/query/stream` | ColBERT pre-filter before cross-encoder |
+| `RAPTOR_ENABLED` | indexing | Summary chunks added at index time |
 | `RAGAS_ENABLED` | `/evaluation/run` | Must be `true` or endpoint returns 403 |

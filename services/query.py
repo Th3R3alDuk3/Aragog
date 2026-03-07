@@ -5,9 +5,8 @@ Full query pipeline:
   1. QueryAnalyzer    — decompose + extract metadata filters in one LLM call
   2. build_filters    — merge LLM-extracted hints + explicit request filters
   3. run_retrieval / retrieve_with_crag — retrieval with optional HyDE and CRAG
-     Pipeline order: RRF joiner → ColBERT pre-filter (optional) → cross-encoder reranker
-  4. swap_to_parent_content — replace child chunks with full parent sections
-  5. run_generation   — prompt_builder → LLM → answer_builder
+     Pipeline order: RRF joiner → AutoMergingRetriever → ColBERT (optional) → cross-encoder
+  4. run_generation   — prompt_builder → LLM → answer_builder
 
 Feature flags (controlled via .env):
   HYDE_ENABLED  — hypothetical document embedding for dense retrieval
@@ -16,7 +15,8 @@ Feature flags (controlled via .env):
 
 import logging
 from dataclasses import dataclass
-from datetime import date as date_type, datetime, time, timezone
+from datetime import date as date_type
+from datetime import datetime, time, timezone
 from typing import Any
 
 from haystack.dataclasses import Document, GeneratedAnswer
@@ -24,7 +24,6 @@ from haystack.dataclasses import Document, GeneratedAnswer
 from components.query_analyzer import AnalysisResult, QueryAnalyzer
 from config import Settings
 from models.api import QueryRequest, SourceDocument
-from pipelines.retrieval import swap_to_parent_content
 
 logger = logging.getLogger(__name__)
 
@@ -223,21 +222,24 @@ def build_filters(
                 conditions.append({"field": "meta.indexed_at_ts", "operator": "<=", "value": ts})
             except ValueError:
                 pass
-        if analysis.classification:
-            conditions.append({
-                "field": "meta.classification", "operator": "==",
-                "value": analysis.classification,
-            })
-        if analysis.language:
-            conditions.append({
-                "field": "meta.language", "operator": "==",
-                "value": analysis.language,
-            })
-        if analysis.source:
-            conditions.append({
-                "field": "meta.source", "operator": "==",
-                "value": analysis.source,
-            })
+        # Skip LLM-extracted metadata hints when explicit filters are provided —
+        # they would AND-conflict and the explicit filters take priority.
+        if not request.filters:
+            if analysis.classification:
+                conditions.append({
+                    "field": "meta.classification", "operator": "==",
+                    "value": analysis.classification,
+                })
+            if analysis.language:
+                conditions.append({
+                    "field": "meta.language", "operator": "==",
+                    "value": analysis.language,
+                })
+            if analysis.source:
+                conditions.append({
+                    "field": "meta.source", "operator": "==",
+                    "value": analysis.source,
+                })
 
     if request.filters:
         explicit = _coerce_request_filters(request.filters)
@@ -298,7 +300,7 @@ async def retrieve_with_crag(
     )
 
 
-_HIDDEN_META = {"parent_content", "original_content", "doc_beginning"}
+_HIDDEN_META = {"original_content", "doc_beginning"}
 
 
 def format_source_docs(docs: list[Document]) -> list[SourceDocument]:
@@ -371,9 +373,9 @@ async def prepare_context(
 ) -> QueryContext:
     """
     Full retrieval phase: analyze → build filters → retrieve per sub-question
-    → deduplicate → parent-content swap → top_k cut.
-    HyDE, ColBERT second-pass reranking, and CRAG are all controlled via
-    .env flags; their logic runs inside the pipeline or service layer.
+    → deduplicate → top_k cut.
+    Parent-content swap is handled inside the pipeline by AutoMergingRetriever.
+    HyDE, ColBERT, and CRAG are controlled via .env flags.
 
     Raises:
         ValueError       — invalid filter expression in request.filters
@@ -418,16 +420,16 @@ async def prepare_context(
             if doc.id not in all_docs_by_id:
                 all_docs_by_id[doc.id] = doc
 
-    # 4. Parent-content swap; budget keeps evidence per sub-question
-    # Sort by score descending so the highest-scoring child wins parent dedup
+    # 4. Sort + cut — parent-content swap already done by AutoMergingRetriever
     candidate_budget = request.top_k * max(1, len(sub_questions))
-    before_swap      = len(all_docs_by_id)
-    sorted_docs      = sorted(all_docs_by_id.values(), key=lambda d: getattr(d, "score", 0.0) or 0.0, reverse=True)
-    merged_docs      = swap_to_parent_content(sorted_docs)
-    merged_docs      = merged_docs[:candidate_budget]
+    merged_docs = sorted(
+        all_docs_by_id.values(),
+        key=lambda d: getattr(d, "score", 0.0) or 0.0,
+        reverse=True,
+    )[:candidate_budget]
     logger.info(
-        "Parent   → %d merged → %d unique sections (budget=%d)",
-        before_swap, len(merged_docs), candidate_budget,
+        "Merged   → %d unique doc(s) (budget=%d)",
+        len(merged_docs), candidate_budget,
     )
 
     merged_docs = merged_docs[:request.top_k]

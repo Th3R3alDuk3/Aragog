@@ -68,7 +68,7 @@ class ColBERTReranker:
             return {"documents": self._rerank_internal(query, documents)}
         except Exception as exc:
             logger.warning(
-                "ColBERT reranking failed (%s), keeping cross-encoder order", exc
+                "ColBERT reranking failed (%s), keeping upstream order", exc
             )
             return {"documents": documents[: self.top_k]}
 

@@ -159,6 +159,12 @@ class RaptorSummarizer:
                     "section_title": section_title,
                     "chunk_type":    "raptor_section",
                     "parent_content": summary_text.strip(),
+                    # AutoMergingRetriever requires these on every leaf doc.
+                    # Point to the level-0 root (source_id); merge score will be
+                    # 1/num_level1_parents << threshold → chunk returned as-is.
+                    "__parent_id":  rep_meta.get("source_id", ""),
+                    "__level":      2,
+                    "__block_size": 0,
                 },
                 id = _stable_id(doc_id, f"raptor_section::{section_path}"),
             )
@@ -187,6 +193,9 @@ class RaptorSummarizer:
                         "section_title": rep_meta.get("title", "Document"),
                         "chunk_type":    "raptor_doc",
                         "parent_content": doc_summary.strip(),
+                        "__parent_id":  rep_meta.get("source_id", ""),
+                        "__level":      2,
+                        "__block_size": 0,
                     },
                     id = _stable_id(doc_id, "raptor_doc"),
                 )

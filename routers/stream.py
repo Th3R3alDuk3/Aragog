@@ -1,6 +1,6 @@
 from json import dumps
 from logging import getLogger
-from typing import Any, AsyncGenerator
+from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from haystack.core.pipeline.async_pipeline import AsyncPipeline

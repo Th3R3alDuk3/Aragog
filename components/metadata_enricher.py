@@ -1,15 +1,15 @@
 from datetime import datetime, timezone
 from hashlib import sha256
 from logging import getLogger
-from re import compile, MULTILINE
+from re import MULTILINE, compile
 
 from haystack import Document, component
 
 from models.meta import ChunkMetadata
 
 try:
-    from langdetect import detect as _langdetect
     from langdetect import DetectorFactory
+    from langdetect import detect as _langdetect
 
     DetectorFactory.seed = 0  # reproducible results
     _LANGDETECT_AVAILABLE = True

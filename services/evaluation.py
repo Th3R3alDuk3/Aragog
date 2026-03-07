@@ -17,7 +17,6 @@ from haystack.core.pipeline.async_pipeline import AsyncPipeline
 
 from config import Settings
 from models.api import EvaluationRequest, EvaluationResponse
-from pipelines.retrieval import swap_to_parent_content
 from services import query as query_service
 
 logger = logging.getLogger(__name__)
@@ -55,7 +54,7 @@ async def run_evaluation(
                 sample.question,
                 None,   # no filters for evaluation
             )
-            docs = swap_to_parent_content(docs)[: request.top_k]
+            docs = docs[: request.top_k]
 
             answers = await query_service.run_generation(
                 generation_pipeline,

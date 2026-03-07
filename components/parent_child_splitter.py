@@ -1,34 +1,29 @@
 """
 ParentChildSplitter — Haystack 2.x custom component.
 
-Receives section documents from ``MarkdownHeaderSplitter`` (one per heading
-section) and implements the parent-child chunking strategy:
+Uses Haystack's built-in ``HierarchicalDocumentSplitter`` to create a two-level
+hierarchy without relying on markdown structure:
 
-• Small sections  (≤ child_chunk_size words):
-    Passed through unchanged.  ``meta["parent_content"]`` is set to the
-    section's own content — the "parent" and "child" are the same document.
+• Level 0 (root): the full document — stored in the parents collection so
+  ``AutoMergingRetriever`` can recurse all the way up when the merge
+  threshold is met at level 1.
 
-• Large sections  (> child_chunk_size words):
-    Split into smaller child chunks via Haystack's built-in
-    ``RecursiveDocumentSplitter``.  Every child receives the full original
-    section text in ``meta["parent_content"]``.
+• Level 1 (parents): larger chunks (parent_chunk_size words) — stored in the
+  parents collection and returned as context by ``AutoMergingRetriever`` at
+  query time.
 
-This component implements the size-budget and parent-child linking step of
-Anthropic Contextual Retrieval:
-    1. ``MarkdownHeaderSplitter`` — semantic section boundaries (built-in)
-    2. ``ParentChildSplitter``    — size budget + parent-child linking (this file)
+• Level 2 (children): smaller chunks (child_chunk_size words) — embedded and
+  indexed in the children collection for dense + sparse retrieval.
 
-The dense embedder embeds the *child* (small, precise signal).
-The query pipeline's ``swap_to_parent_content()`` passes the *parent*
-(full section text) to the LLM for richer answer context.
+Every child carries ``meta["__parent_id"]`` (set by HierarchicalDocumentSplitter),
+which ``AutoMergingRetriever`` uses at query time to fetch the matching parent
+from the parents Qdrant collection.
 """
 
 import logging
 
 from haystack import Document, component
-from haystack.components.preprocessors import RecursiveDocumentSplitter
-
-from models.meta import ChunkMetadata
+from haystack.components.preprocessors import HierarchicalDocumentSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -36,75 +31,56 @@ logger = logging.getLogger(__name__)
 @component
 class ParentChildSplitter:
     """
-    Adds parent-child linking to section documents.
+    Splits documents into a two-level hierarchy using HierarchicalDocumentSplitter.
 
     Args:
-        child_chunk_size:    Maximum words per child chunk.
-        child_chunk_overlap: Word overlap carried between adjacent child chunks.
+        parent_chunk_size:   Maximum words per parent chunk (level 1).
+        child_chunk_size:    Maximum words per child chunk  (level 2, leaf).
+        child_chunk_overlap: Word overlap between adjacent child chunks.
     """
 
     def __init__(
         self,
+        parent_chunk_size: int = 600,
         child_chunk_size: int = 200,
         child_chunk_overlap: int = 20,
     ) -> None:
-        self.child_chunk_size = child_chunk_size
-        # Haystack's RecursiveDocumentSplitter handles the secondary splitting.
-        # It tries progressively finer separators (\n\n → sentence → \n → space)
-        # ensuring splits happen at natural boundaries.
-        self._splitter = RecursiveDocumentSplitter(
-            split_length=child_chunk_size,
+        self._splitter = HierarchicalDocumentSplitter(
+            block_sizes={parent_chunk_size, child_chunk_size},
             split_overlap=child_chunk_overlap,
-            split_unit="word",
+            split_by="word",
         )
 
-    @component.output_types(documents=list[Document])
+    @component.output_types(children=list[Document], parents=list[Document])
     def run(self, documents: list[Document]) -> dict[str, list[Document]]:
-        """Split oversized sections into child chunks and link each child to its parent.
-
-        Sections that fit within ``child_chunk_size`` words are passed through
-        unchanged. Larger sections are split by ``RecursiveDocumentSplitter``
-        and each resulting chunk receives the full section text in
-        ``meta["parent_content"]`` for later use during answer generation.
+        """Split documents into parent and child chunks.
 
         Args:
-            documents: Section documents from MarkdownHeaderSplitter.
+            documents: Cleaned documents from the DocumentCleaner stage.
 
         Returns:
-            A dict with key ``"documents"`` containing one or more child chunks
-            per input section.
+            ``children``: leaf-level chunks (``__level == 2``) ready for
+                          embedding and indexing in the children collection.
+                          Each carries ``meta["__parent_id"]`` used by
+                          ``AutoMergingRetriever`` at query time.
+            ``parents``:  level-0 root + level-1 chunks stored in the parents
+                          collection.  Both levels are required so that
+                          ``AutoMergingRetriever`` can recurse from level 2 →
+                          level 1 → level 0 without a missing-document crash.
         """
-        output: list[Document] = []
-        child_count = 0
+        result   = self._splitter.run(documents=documents)
+        all_docs = result["documents"]
 
-        for section in documents:
-            content    = section.content or ""
-            word_count = len(content.split())
-
-            if word_count <= self.child_chunk_size:
-                # Section fits in one child — parent and child are identical
-                output.append(_with_parent(section, content))
-                child_count += 1
-            else:
-                # Section is too large — split into children
-                split_result = self._splitter.run(documents=[section])
-                children     = split_result.get("documents", [])
-                for child in children:
-                    output.append(_with_parent(child, content))
-                child_count += len(children)
+        # AutoMergingRetriever recursively walks __parent_id links upward.
+        # If a level-1 set merges into level-0, the level-0 root must exist in
+        # the parents store or the retriever raises ValueError.
+        parents  = [d for d in all_docs if d.meta.get("__level") in (0, 1)]
+        children = [d for d in all_docs if d.meta.get("__level") == 2]
 
         logger.info(
-            "ParentChildSplitter: %d section(s) → %d chunk(s)",
+            "ParentChildSplitter: %d doc(s) → %d parent(s), %d child(ren)",
             len(documents),
-            child_count,
+            len(parents),
+            len(children),
         )
-        return {"documents": output}
-
-
-# ---------------------------------------------------------------------------
-
-def _with_parent(child: Document, parent_text: str) -> Document:
-    meta = ChunkMetadata.model_validate(child.meta)
-    meta.parent_content = parent_text
-    meta.parent_section = meta.header
-    return Document(content=child.content, meta=meta.model_dump(), id=child.id)
+        return {"children": children, "parents": parents}

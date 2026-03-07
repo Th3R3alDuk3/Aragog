@@ -51,14 +51,15 @@ async def lifespan(app: FastAPI):
 
     # Qdrant: document store and indexing, retrieval, generation pipelines
 
-    indexing_pipeline, document_store = build_indexing_pipeline(settings)
-    retrieval_pipeline = build_retrieval_pipeline(settings, document_store)
+    indexing_pipeline, children_store, parents_store = build_indexing_pipeline(settings)
+    retrieval_pipeline = build_retrieval_pipeline(settings, children_store, parents_store)
     generation_pipeline = build_generation_pipeline(settings)
 
     logger.info(
-        "Qdrant connected (%s, collection: %s)",
+        "Qdrant connected (%s, children: %s, parents: %s)",
         settings.qdrant_url,
-        settings.qdrant_collection,
+        settings.qdrant_children_collection,
+        settings.qdrant_parents_collection,
     )
 
     # MinIO: stores original uploaded documents.
@@ -90,7 +91,8 @@ async def lifespan(app: FastAPI):
         logger.info("HyDE enabled (model: %s)", settings.effective_instruct_model)
 
     app.state.settings = settings
-    app.state.document_store = document_store
+    app.state.children_store = children_store
+    app.state.parents_store = parents_store
     app.state.indexing_pipeline = indexing_pipeline
     app.state.indexing_semaphore = Semaphore(settings.indexing_max_concurrent)
     app.state.retrieval_pipeline = retrieval_pipeline
@@ -120,10 +122,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_settings().cors_origins_list,
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=True,
 )
 
 app.include_router(documents_router)

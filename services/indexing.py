@@ -3,9 +3,9 @@ Indexing service — pipeline orchestration for document indexing.
 
 Handles all business logic for indexing documents into Qdrant:
   deleting_stale → uploading_minio → converting → enriching_metadata
-  → cleaning → splitting_headers → splitting_chunks → enriching_chunks
-  → analyzing_content → [summarizing_raptor] → embedding_dense
-  → embedding_sparse → writing → done
+  → cleaning → splitting_chunks → [writing_parents]
+  → enriching_chunks → analyzing_content → [summarizing_raptor]
+  → embedding_dense → embedding_sparse → writing → done
 """
 
 import asyncio
@@ -45,7 +45,8 @@ def _run_component(pipeline: AsyncPipeline, task: TaskState, step: str, componen
 def _sync_index(
     task: TaskState,
     pipeline: AsyncPipeline,
-    document_store: QdrantDocumentStore,
+    children_store: QdrantDocumentStore,
+    parents_store: QdrantDocumentStore,
     minio_store,
     file_bytes: bytes,
     original_name: str,
@@ -58,16 +59,19 @@ def _sync_index(
         task.status = "running"
         task.updated_at = datetime.now(timezone.utc)
 
-        # ── Pre-pipeline: delete stale chunks ────────────────────────────────
+        # ── Pre-pipeline: delete stale docs from both collections ────────────
         _advance(task, "deleting_stale")
-        try:
-            stale = document_store.filter_documents(
-                filters={"field": "meta.source", "operator": "==", "value": original_name}
-            )
-            if stale:
-                document_store.delete_documents([doc.id for doc in stale])
-        except Exception as exc:
-            logger.warning("Could not delete stale chunks for '%s': %s", original_name, exc)
+        stale_filter = {"field": "meta.source", "operator": "==", "value": original_name}
+        for store in (children_store, parents_store):
+            try:
+                stale = store.filter_documents(filters=stale_filter)
+                if stale:
+                    store.delete_documents([doc.id for doc in stale])
+            except Exception as exc:
+                logger.warning(
+                    "Could not delete stale docs in '%s' for '%s': %s",
+                    store.index, original_name, exc,
+                )
 
         # ── Pre-pipeline: upload to MinIO ─────────────────────────────────────
         _advance(task, "uploading_minio")
@@ -81,8 +85,10 @@ def _sync_index(
             ) as tmp:
                 tmp.write(file_bytes)
                 tmp_upload_path = tmp.name
-            minio_url = minio_store.upload(tmp_upload_path, minio_key)
-            Path(tmp_upload_path).unlink(missing_ok=True)
+            try:
+                minio_url = minio_store.upload(tmp_upload_path, minio_key)
+            finally:
+                Path(tmp_upload_path).unlink(missing_ok=True)
         except Exception as exc:
             logger.warning("MinIO upload failed: %s", exc)
             minio_url = None
@@ -117,31 +123,39 @@ def _sync_index(
                 documents=docs,
             )["documents"]
 
-            # Stage 4 — MarkdownHeaderSplitter: split at H1-H6 boundaries
-            docs = _run_component(
-                pipeline, task, "splitting_headers", "header_splitter",
-                documents=docs,
-            )["documents"]
-
-            # Stage 5 — ParentChildSplitter: child chunks + parent_content meta
-            docs = _run_component(
+            # Stage 4 — ParentChildSplitter: children (→ children collection) + parents (→ parents collection)
+            split_result = _run_component(
                 pipeline, task, "splitting_chunks", "parent_child_splitter",
                 documents=docs,
-            )["documents"]
+            )
+            children = split_result["children"]
+            parents  = split_result["parents"]
 
-            # Stage 6 — ChunkContextEnricher: chunk_index, section_path, …
+            # ── Parents branch: write to parents collection (no embedding needed) ────
+            # Strip EphemeralMeta fields before writing — parents skip ContentAnalyzer
+            # which normally excludes doc_beginning via model_dump(exclude={"doc_beginning"}).
+            for p in parents:
+                p.meta.pop("doc_beginning", None)
+            _run_component(
+                pipeline, task, "writing_parents", "parents_writer",
+                documents=parents,
+            )
+
+            # ── Children branch: enrich → analyze → [raptor] → embed → write ─
+
+            # Stage 5 — ChunkContextEnricher: chunk_index, section_path, …
             docs = _run_component(
                 pipeline, task, "enriching_chunks", "chunk_enricher",
-                documents=docs,
+                documents=children,
             )["documents"]
 
-            # Stage 7 — ContentAnalyzer: one LLM call/chunk (parallelised)
+            # Stage 6 — ContentAnalyzer: one LLM call/chunk (parallelised)
             docs = _run_component(
                 pipeline, task, "analyzing_content", "analyzer",
                 documents=docs,
             )["documents"]
 
-            # Stage 8 — RaptorSummarizer (optional)
+            # Stage 7 — RaptorSummarizer (optional)
             try:
                 docs = _run_component(
                     pipeline, task, "summarizing_raptor", "raptor",
@@ -150,21 +164,21 @@ def _sync_index(
             except ValueError:
                 pass  # component not present — RAPTOR_ENABLED=false
 
-            # Stage 9 — SentenceTransformersDocumentEmbedder: dense vectors
+            # Stage 8 — SentenceTransformersDocumentEmbedder: dense vectors
             docs = _run_component(
                 pipeline, task, "embedding_dense", "dense_embedder",
                 documents=docs,
             )["documents"]
 
-            # Stage 10 — FastembedSparseDocumentEmbedder: sparse vectors
+            # Stage 9 — FastembedSparseDocumentEmbedder: sparse vectors
             docs = _run_component(
                 pipeline, task, "embedding_sparse", "sparse_embedder",
                 documents=docs,
             )["documents"]
 
-            # Stage 11 — DocumentWriter: persist to Qdrant
+            # Stage 10 — DocumentWriter: persist children to Qdrant
             written: int = _run_component(
-                pipeline, task, "writing", "writer",
+                pipeline, task, "writing", "children_writer",
                 documents=docs,
             ).get("documents_written", 0)
 
@@ -187,7 +201,8 @@ def _sync_index(
 
 async def run_indexing(
     task: TaskState,
-    document_store: QdrantDocumentStore,
+    children_store: QdrantDocumentStore,
+    parents_store: QdrantDocumentStore,
     minio_store: MinioStore,
     pipeline: AsyncPipeline,
     file_name: str,
@@ -198,5 +213,5 @@ async def run_indexing(
     await loop.run_in_executor(
         None,
         _sync_index,
-        task, pipeline, document_store, minio_store, file_bytes, file_name,
+        task, pipeline, children_store, parents_store, minio_store, file_bytes, file_name,
     )

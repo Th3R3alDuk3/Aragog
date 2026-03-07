@@ -60,7 +60,11 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 88
+line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]  # pycodestyle + pyflakes + isort
+
+[tool.ruff.lint.per-file-ignores]
+# LLM prompt strings contain intentionally long few-shot examples
+"components/query_analyzer.py" = ["E501"]

@@ -10,10 +10,11 @@ from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from models.api import TaskCreatedResponse, TaskState
 from routers._deps import (
-    get_document_store,
+    get_children_store,
     get_indexing_pipeline,
     get_indexing_semaphore,
     get_minio_store,
+    get_parents_store,
     get_task_store,
 )
 from services import indexing as indexing_service
@@ -38,14 +39,30 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 )
 async def index_document(
     file: UploadFile = File(...),
-    document_store: QdrantDocumentStore = Depends(get_document_store),
+    children_store: QdrantDocumentStore = Depends(get_children_store),
+    parents_store: QdrantDocumentStore = Depends(get_parents_store),
     minio_store: MinioStore = Depends(get_minio_store),
     indexing_pipeline: AsyncPipeline = Depends(get_indexing_pipeline),
     indexing_semaphore: Semaphore = Depends(get_indexing_semaphore),
     task_store: dict = Depends(get_task_store),
 ) -> TaskCreatedResponse:
 
-    file_bytes = await file.read()
+    _MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+    _READ_CHUNK = 64 * 1024              # 64 KB per read call
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="File too large. Maximum allowed is 50 MB.",
+            )
+        chunks.append(chunk)
+    file_bytes = b"".join(chunks)
     file_name = Path(file.filename).name
 
     now = datetime.now(timezone.utc)
@@ -70,7 +87,8 @@ async def index_document(
         async with indexing_semaphore:
             await indexing_service.run_indexing(
                 task=task,
-                document_store=document_store,
+                children_store=children_store,
+                parents_store=parents_store,
                 minio_store=minio_store,
                 pipeline=indexing_pipeline,
                 file_name=file_name,

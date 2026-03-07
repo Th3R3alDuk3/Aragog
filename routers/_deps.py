@@ -21,8 +21,12 @@ def get_settings(request: Request) -> Settings:
 # --- Infrastructure ---
 
 
-def get_document_store(request: Request) -> QdrantDocumentStore:
-    return request.app.state.document_store
+def get_children_store(request: Request) -> QdrantDocumentStore:
+    return request.app.state.children_store
+
+
+def get_parents_store(request: Request) -> QdrantDocumentStore:
+    return request.app.state.parents_store
 
 
 def get_minio_store(request: Request):

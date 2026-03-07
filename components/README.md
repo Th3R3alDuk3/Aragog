@@ -95,27 +95,36 @@ to Qdrant.
 
 **File:** `parent_child_splitter.py` | **Type:** Haystack `@component`
 
-Implements parent-child chunking: splits each document section (parent) into
-smaller child chunks while storing the full parent text in each child's metadata.
+Implements parent-child chunking using Haystack's built-in
+`HierarchicalDocumentSplitter`. Creates a two-level hierarchy:
 
-**Input/Output:** `documents: list[Document]`
+- **Level 1 (parents):** larger chunks (`PARENT_CHUNK_SIZE` words) — written to the
+  parents Qdrant collection; fetched at query time by `AutoMergingRetriever`.
+- **Level 2 (children):** smaller chunks (`CHILD_CHUNK_SIZE` words) — embedded and
+  stored in the children collection for dense + sparse retrieval.
 
-Internally uses Haystack's `RecursiveDocumentSplitter` with sentence-boundary
-splitting. Configured via:
+Level 0 (the full document) is discarded.
 
-| Setting | Default | Notes |
-|---------|---------|-------|
-| `child_chunk_size` | 200 words | `CHILD_CHUNK_SIZE` in `.env` |
-| `child_chunk_overlap` | 20 words | `CHILD_CHUNK_OVERLAP` in `.env` |
+**Outputs:** `children: list[Document]`, `parents: list[Document]`
 
-**Fields added to each child chunk:**
+**Key metadata fields set by `HierarchicalDocumentSplitter`:**
 
 | Field | Content |
 |-------|---------|
-| `parent_content` | Full markdown text of the parent section |
-| `parent_section` | Section title (= `meta["header"]`) |
+| `__level` | 1 for parents, 2 for children |
+| `__parent_id` | ID of the parent document (used by `AutoMergingRetriever`) |
 
-Sections ≤ `child_chunk_size` words are kept as a single chunk.
+**Configuration:**
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `parent_chunk_size` | 600 words | `PARENT_CHUNK_SIZE` in `.env` |
+| `child_chunk_size` | 200 words | `CHILD_CHUNK_SIZE` in `.env` |
+| `child_chunk_overlap` | 20 words | `CHILD_CHUNK_OVERLAP` in `.env` |
+
+At query time, `AutoMergingRetriever` uses `__parent_id` to replace a child set
+with the matching parent document when enough children from the same parent are
+retrieved (threshold-based, `AUTO_MERGE_THRESHOLD`).
 
 See [Theory: Parent-Child Chunking](#15-theory-parent-child-chunking) for rationale.
 
@@ -123,7 +132,7 @@ See [Theory: Parent-Child Chunking](#15-theory-parent-child-chunking) for ration
 
 ## 4. ChunkContextEnricher
 
-**File:** `chunk_context_enricher.py` | **Type:** Haystack `@component`
+**File:** `chunk_enricher.py` | **Type:** Haystack `@component`
 
 Adds structural metadata to each chunk after splitting.
 
@@ -148,7 +157,7 @@ plus the current `header`. Used by RAPTOR to group chunks by section.
 
 **File:** `content_analyzer.py` | **Type:** Haystack `@component`
 
-Runs one LLM call per chunk (in parallel via `ThreadPoolExecutor`) to generate:
+Runs one LLM call per chunk (in parallel via `asyncio.gather` + `asyncio.Semaphore`) to generate:
 
 - **`context_prefix`** — 1-2 sentence contextual preamble (Anthropic Contextual Retrieval)
 - **`summary`** — 2-3 sentence abstractive summary
@@ -199,23 +208,22 @@ See [Theory: Multi-Question Decomposition](#17-theory-multi-question-decompositi
 
 ## 7. HyDEGenerator
 
-**File:** `hyde_generator.py` | **Type:** Standalone class
+**File:** `hyde_generator.py` | **Type:** Haystack `@component`
 
 Generates a hypothetical document passage that would answer the query, then uses
 that passage for dense embedding instead of the raw query text.
 
-```python
-generator = HyDEGenerator(openai_api_key=..., llm_model=..., openai_base_url=...)
-hypothetical_doc = generator.generate(query)   # str
-```
+Wired into the retrieval pipeline as a second dense branch when `HYDE_ENABLED=true`.
 
-**Prompt:** `"Write a short factual document passage (3-5 sentences) that would directly answer the following question..."`
-**Parameters:** temperature=0.5, max_tokens=300
-**Fallback:** Returns the original query on any error.
+**Input:** `query: str`
+**Output:** `{"text": str}` — hypothetical passage (or original query on error)
 
-**Integration:** The dense embedder receives the hypothetical doc; the sparse embedder
-and reranker always receive the original query. Enabled globally via `HYDE_ENABLED=true`
-or per-request via `use_hyde=true` in the query body.
+**Parameters:** temperature=0.5, max_tokens=250
+**Fallback:** Returns the original query on any LLM error — retrieval continues normally.
+
+**Integration:** The HyDE dense embedder/retriever branch receives the hypothetical doc;
+the sparse embedder and cross-encoder reranker always use the original query.
+Enabled globally via `HYDE_ENABLED=true` in `.env` (pipeline-level, not per-request).
 
 See [Theory: HyDE](#18-theory-hyde).
 
@@ -237,7 +245,7 @@ Optional second-level summarization inserted after `ContentAnalyzer` and before
 3. **Document level:** combine section summaries → LLM 5-8 sentence synthesis → `chunk_type="raptor_doc"`
 4. Stable IDs: `sha256((doc_id + "::" + suffix).encode()).hexdigest()`
 
-LLM calls are parallelised via `ThreadPoolExecutor` using `ANALYZER_MAX_WORKERS`.
+LLM calls are parallelised via `ThreadPoolExecutor` using `ANALYZER_MAX_CONCURRENCY` workers.
 Sections with no usable summaries are skipped gracefully.
 
 See [Theory: RAPTOR](#19-theory-raptor).
@@ -246,20 +254,18 @@ See [Theory: RAPTOR](#19-theory-raptor).
 
 ## 9. ColBERTReranker
 
-**File:** `colbert_reranker.py` | **Type:** Standalone class
+**File:** `colbert_reranker.py` | **Type:** Haystack `@component`
 
-Second-pass reranker using ColBERT late-interaction scoring (via [pylate](https://github.com/lightonai/pylate)).
-Applied *after* the cross-encoder and *after* `swap_to_parent_content()`, before the
-final `top_k` slice.
+Late-interaction pre-filter using ColBERT scoring (via [pylate](https://github.com/lightonai/pylate)).
+Applied *before* the cross-encoder as a fast candidate reduction step:
+`AutoMergingRetriever → ColBERTReranker (→ COLBERT_TOP_K) → cross-encoder reranker`
 
-```python
-reranker = ColBERTReranker(model_name="colbert-ir/colbertv2.0", top_k=5)
-docs = reranker.rerank(query, documents)  # list[Document]
-```
+**Input:** `query: str`, `documents: list[Document]`
+**Output:** `{"documents": list[Document]}` — top `COLBERT_TOP_K` docs by ColBERT score
 
 **Model:** `colbert-ir/colbertv2.0` (~500 MB, downloaded once and cached by HuggingFace hub).
-**Fallback:** Any exception → falls back to cross-encoder order silently.
-**Lazy loading:** Model is loaded on first `rerank()` call, not at startup.
+**Fallback:** Any exception → falls back to upstream order silently (never breaks the pipeline).
+**Lazy loading:** Model is loaded on first `run()` call, not at startup.
 
 See [Theory: ColBERT Late Interaction](#21-theory-colbert-late-interaction).
 
@@ -398,21 +404,22 @@ Child chunks (≈200 words each):
   Child 2: "The EBITDA margin improved to 23 %. Customer acquisition costs..."
 ```
 
-- **Indexing:** Embed child chunks (precise retrieval signal). Store `parent_content` in each child's meta.
-- **Querying:** Retrieve child chunks. `swap_to_parent_content()` replaces content with full parent section before LLM generation.
-- **Deduplication:** Multiple children from the same parent → send parent only once.
+- **Indexing:** Embed child chunks (precise retrieval signal). Parents written to a separate Qdrant collection linked by `__parent_id`.
+- **Querying:** Retrieve child chunks. `AutoMergingRetriever` replaces a child set with the parent document when enough siblings are retrieved (threshold-based).
+- **Deduplication:** Multiple children from the same parent → `AutoMergingRetriever` sends the parent only once.
 
 ---
 
-## 16. Theory: Markdown Splitting
+## 16. Theory: Chunk Splitting Strategy
 
-**Pass 1 — `MarkdownHeaderSplitter` (Haystack built-in):**
-Splits at every H1-H6 boundary. Each section covers exactly one topic.
-Sets `meta["header"]` and `meta["parent_headers"]` per section.
+**`ParentChildSplitter` (wraps Haystack `HierarchicalDocumentSplitter`):**
+Splits documents into a two-level word-based hierarchy:
+- Level 1 (parents): ~`PARENT_CHUNK_SIZE` words
+- Level 2 (children): ~`CHILD_CHUNK_SIZE` words, with `CHILD_CHUNK_OVERLAP` overlap
 
-**Pass 2 — `ParentChildSplitter`:**
-Splits each section into child chunks of `CHILD_CHUNK_SIZE` words with sentence-boundary overlap.
-Full section text stored as `parent_content`.
+`HierarchicalDocumentSplitter` sets `meta["__level"]`, `meta["__parent_id"]`,
+`meta["__header"]`, and `meta["__parent_headers"]` per chunk.
+`ChunkEnricher` reads these to populate `section_title` and `section_path`.
 
 **Why not embedding-similarity splitting?** True semantic splitting requires embedding
 every sentence during indexing (100s of ms per section). For well-structured markdown
@@ -544,8 +551,9 @@ Score = Σᵢ max_j( sim(qᵢ, dⱼ) )
 This catches precise term-level matching that a single dense vector misses, while
 remaining more efficient than a full cross-encoder (no joint encoding).
 
-**Position in pipeline:** Applied as a *second-pass reranker* after the
-`SentenceTransformersSimilarityRanker` (cross-encoder) has already narrowed candidates.
+**Position in pipeline:** Applied as a *pre-filter before* the
+`SentenceTransformersSimilarityRanker` (cross-encoder).
+Pipeline order: `AutoMergingRetriever → ColBERTReranker (→ top-K) → cross-encoder`.
 No Qdrant index changes required — scores are computed on-the-fly.
 
 **Model:** `colbert-ir/colbertv2.0` (~500 MB, cached by HuggingFace hub).

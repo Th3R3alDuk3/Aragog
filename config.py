@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     # --- Qdrant ---
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str = ""
-    qdrant_collection: str = "documents"
+    qdrant_children_collection: str = "children"
+    qdrant_parents_collection: str = "parents"
 
     # --- MinIO ---
     minio_endpoint: str = "localhost:9000"
@@ -73,9 +74,9 @@ class Settings(BaseSettings):
     )
 
     # --- Contextual Chunking ---
+    parent_chunk_size: int = 600
     child_chunk_size: int = 200
     child_chunk_overlap: int = 20
-    parent_enabled: bool = True
     doc_beginning_chars: int = 1500
 
     # --- RAPTOR (multi-level summary chunks) ---
@@ -91,6 +92,9 @@ class Settings(BaseSettings):
 
     # --- HyDE (pre-retrieval: hypothetical document embedding) ---
     hyde_enabled: bool = True
+
+    # --- AutoMergingRetriever (parent-context swap, threshold-based) ---
+    auto_merge_threshold: float = 0.5
 
     # --- ColBERT (late-interaction first-pass before cross-encoder) ---
     colbert_enabled: bool = True
@@ -128,6 +132,14 @@ class Settings(BaseSettings):
     indexing_max_concurrent: int = 3
     app_host: str = "0.0.0.0"
     app_port: int = 8000
+    # Comma-separated list of allowed CORS origins.
+    # Use "*" for local development; set explicit origins in production,
+    # e.g. "https://app.example.com,https://admin.example.com".
+    cors_origins: str = "*"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

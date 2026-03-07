@@ -1,6 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # ── Stage 2: MetadataEnricher — document identity ──────────────────────────
 
 
@@ -39,7 +38,7 @@ class EmbeddingMeta(BaseModel):
     embedding_dimension: int = Field(default=0, description="Dense vector dimension.")
 
 
-# ── Stage 2→7: ephemeral (stripped before writing to Qdrant) ───────────────
+# ── Stage 2→6: ephemeral (stripped before writing to Qdrant) ───────────────
 
 
 class EphemeralMeta(BaseModel):
@@ -54,34 +53,16 @@ class EphemeralMeta(BaseModel):
     )
 
 
-# ── Stage 4: MarkdownHeaderSplitter (Haystack-internal) ────────────────────
+# ── Stage 4: HierarchicalDocumentSplitter (Haystack-internal) ──────────────
+# Note: HierarchicalDocumentSplitter does NOT inject header/parent_headers.
+# Heading context is extracted from chunk content by ChunkEnricher instead.
 
 
 class HaystackMeta(BaseModel):
-    """Fields injected by Haystack's MarkdownHeaderSplitter."""
-
-    header: str = Field(default="", description="Immediate section heading.")
-    parent_headers: list[str] = Field(
-        default_factory=list, description="Ancestor headings from root to parent."
-    )
+    """Placeholder for any future Haystack-injected fields at stage 4."""
 
 
-# ── Stage 5: ParentChildSplitter ───────────────────────────────────────────
-
-
-class ParentChildMeta(BaseModel):
-    """Links a child chunk back to the full section it was split from."""
-
-    parent_content: str = Field(
-        default="",
-        description="Full section text — swapped in at query time for richer LLM context.",
-    )
-    parent_section: str = Field(
-        default="", description="Heading of the parent section."
-    )
-
-
-# ── Stage 6: ChunkEnricher ─────────────────────────────────────────────────
+# ── Stage 5: ChunkEnricher ─────────────────────────────────────────────────
 
 
 class ChunkStructureMeta(BaseModel):
@@ -106,7 +87,7 @@ class ChunkStructureMeta(BaseModel):
     )
 
 
-# ── Stage 7: ContentAnalyzer ───────────────────────────────────────────────
+# ── Stage 6: ContentAnalyzer ───────────────────────────────────────────────
 
 
 class Entities(BaseModel):
@@ -207,7 +188,6 @@ class ChunkMetadata(
     EmbeddingMeta,
     EphemeralMeta,
     HaystackMeta,
-    ParentChildMeta,
     ChunkStructureMeta,
     SemanticMeta,
 ):

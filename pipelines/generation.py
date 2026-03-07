@@ -16,8 +16,8 @@ Pipeline flow
     AnswerBuilder
 """
 
-from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack.components.builders import AnswerBuilder, PromptBuilder
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 
 from config import Settings
 from pipelines._factories import build_generator

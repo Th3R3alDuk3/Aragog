@@ -40,7 +40,6 @@ class QueryRequest(BaseModel):
     filters: dict | None     # Haystack filter expression (see §5)
     date_from: date | None   # ISO 8601 date, translated to indexed_at_ts >=
     date_to: date | None     # ISO 8601 date, translated to indexed_at_ts <=
-    use_hyde: bool = False   # enable HyDE for this request (also via HYDE_ENABLED=true)
 ```
 
 #### `SourceDocument`
@@ -96,18 +95,6 @@ class EvaluationResponse(BaseModel):
 
 ---
 
-### Health
-
-#### `HealthResponse`
-
-```python
-class HealthResponse(BaseModel):
-    status: str = "ok"
-    document_store: str = "unknown"  # e.g. "ok (1234 chunks)" or "error: ..."
-```
-
----
-
 ## 2. Chunk Metadata Schema
 
 Every document chunk stored in Qdrant carries a flat metadata object.
@@ -140,11 +127,10 @@ This is the authoritative field specification.
   "section_path":   "3 › 3.2 › Finanzergebnisse",   // Heading breadcrumb
   "chunk_type":     "text",     // text | table | code | list | figure_caption
 
-  // ── Parent-Child Linking (set by ParentChildSplitter) ───────────────────
-  "parent_content": "# Finanzergebnisse Q3\n\nIm dritten Quartal…",
-                                // Full markdown text of the parent section.
-                                // Retrieved child → LLM receives parent.
-  "parent_section": "Finanzergebnisse Q3",
+  // ── Parent-Child Linking (set by HierarchicalDocumentSplitter) ─────────────
+  "__parent_id": "abc123...",   // ID of the parent document in the parents collection.
+                                // Used by AutoMergingRetriever to fetch parent context.
+  "__level":     2,             // Hierarchy level: 1=parent, 2=child
 
   // ── Contextual Prefix (set by ContentAnalyzer, Anthropic Option A) ────────
   "context_prefix": "Dieser Abschnitt stammt aus dem Jahresbericht 2024 der…",
@@ -159,16 +145,15 @@ This is the authoritative field specification.
   "keywords":        ["Umsatz", "Q3", "Wachstum", "EBITDA", "Vorjahresvergleich"],
   "classification":  "financial",  // One label from CLASSIFICATION_TAXONOMY in .env
 
-  "entities": {
-    "persons":            ["Max Mustermann"],
-    "organizations":      ["Musterfirma GmbH", "Bundesanstalt für…"],
-    "locations":          ["München", "Deutschland"],
-    "dates":              ["Q3 2024", "September 2024", "FY2023"],
-    "products":           ["SAP S/4HANA", "Power BI"],
-    "laws_and_standards": ["HGB §285", "ISO 9001"],
-    "events":             ["Hauptversammlung 2024", "Q3 Earnings Call"],
-    "quantities":         ["€ 4,2 Mrd.", "12 %", "ca. 1 500 Mitarbeiter"]
-  },
+  // Entities stored as flat fields (prefix ent_) for meta_fields_to_embed + Qdrant indexing:
+  "ent_persons":        ["Max Mustermann"],
+  "ent_organizations":  ["Musterfirma GmbH", "Bundesanstalt für…"],
+  "ent_locations":      ["München", "Deutschland"],
+  "ent_dates":          ["Q3 2024", "September 2024", "FY2023"],
+  "ent_products":       ["SAP S/4HANA", "Power BI"],
+  "ent_laws":           ["HGB §285", "ISO 9001"],
+  "ent_events":         ["Hauptversammlung 2024", "Q3 Earnings Call"],
+  "ent_quantities":     ["€ 4,2 Mrd.", "12 %", "ca. 1 500 Mitarbeiter"],
 
   // ── Embedding Provenance (set by MetadataEnricher) ───────────────────────
   "embedding_model":     "BAAI/bge-m3",
@@ -210,12 +195,12 @@ This is the authoritative field specification.
 | `section_path` | string | ChunkContextEnricher | Full heading breadcrumb |
 | `chunk_type` | string | ChunkContextEnricher | `text\|table\|code\|list\|figure_caption` |
 
-### Parent-child fields
+### Parent-child fields (set by HierarchicalDocumentSplitter)
 
 | Field | Type | Set by | Notes |
 |-------|------|--------|-------|
-| `parent_content` | string | ParentChildSplitter | Full section text for LLM context |
-| `parent_section` | string | ParentChildSplitter | Section title |
+| `__parent_id` | string | HierarchicalDocumentSplitter | ID of parent doc in parents collection |
+| `__level` | int | HierarchicalDocumentSplitter | 1=parent, 2=child |
 
 ### Contextual prefix fields
 
@@ -231,14 +216,14 @@ This is the authoritative field specification.
 | `summary` | string | ContentAnalyzer | 2-3 sentence abstractive summary |
 | `keywords` | string[] | ContentAnalyzer | 5-10 key terms |
 | `classification` | string | ContentAnalyzer | From `CLASSIFICATION_TAXONOMY` |
-| `entities.organizations` | string[] | ContentAnalyzer | |
-| `entities.persons` | string[] | ContentAnalyzer | |
-| `entities.locations` | string[] | ContentAnalyzer | |
-| `entities.dates` | string[] | ContentAnalyzer | All temporal expressions |
-| `entities.products` | string[] | ContentAnalyzer | Product names, software, brand names |
-| `entities.laws_and_standards` | string[] | ContentAnalyzer | Laws, regulations, norms |
-| `entities.events` | string[] | ContentAnalyzer | Named events, projects, incidents |
-| `entities.quantities` | string[] | ContentAnalyzer | Monetary values, percentages, measurements |
+| `ent_persons` | string[] | ContentAnalyzer | Full person names |
+| `ent_organizations` | string[] | ContentAnalyzer | Companies, agencies, institutions |
+| `ent_locations` | string[] | ContentAnalyzer | Countries, cities, regions |
+| `ent_dates` | string[] | ContentAnalyzer | All temporal expressions |
+| `ent_products` | string[] | ContentAnalyzer | Product names, software, brand names |
+| `ent_laws` | string[] | ContentAnalyzer | Laws, regulations, norms |
+| `ent_events` | string[] | ContentAnalyzer | Named events, projects, incidents |
+| `ent_quantities` | string[] | ContentAnalyzer | Monetary values, percentages, measurements |
 
 ### Embedding provenance
 
@@ -255,11 +240,11 @@ This is the authoritative field specification.
 | Content | Stored in Qdrant | Used for embedding |
 |---------|------------------|--------------------|
 | `context_prefix + chunk_content` | as `doc.content` | ✅ dense + sparse |
-| `section_title` | in meta | ✅ appended by embedder |
-| `original_content` | in meta | ❌ display only |
-| `parent_content` | in meta | ❌ LLM context only |
-| `summary`, `keywords` | in meta | ❌ filterable |
-| `entities` | in meta as JSON | ❌ filterable |
+| `section_title`, `title`, `summary`, `keywords` | in meta | ✅ appended by embedder (`meta_fields_to_embed`) |
+| `ent_persons`, `ent_organizations`, `ent_products`, `ent_laws` | in meta | ✅ appended by embedder |
+| `original_content` | in meta (children only) | ❌ display / citation only |
+| `ent_locations`, `ent_dates`, `ent_events`, `ent_quantities` | in meta | ❌ filterable only |
+| parent documents (`__level=1`) | in parents collection | ❌ fetched by AutoMergingRetriever |
 
 ---
 

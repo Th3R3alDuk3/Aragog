@@ -18,19 +18,19 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 │      │              indexed_at_ts, language via langdetect)         │
 │  DocumentCleaner                                                    │
 │      │                                                              │
-│  MarkdownHeaderSplitter  ◄── Haystack built-in (H1–H6)              │
-│      │  • meta["header"], meta["parent_headers"] set per chunk      │
-│      │                                                              │
-│  ParentChildSplitter  ◄── Anthropic Contextual Retrieval A          │
-│      │  • child chunks (200 words) for precise retrieval            │
-│      │  • meta["parent_content"] = full section text for LLM        │
+│  ParentChildSplitter  ◄── HierarchicalDocumentSplitter               │
+│      │  • children (200 words) → children Qdrant collection        │
+│      │  • parents  (600 words) → parents  Qdrant collection        │
+│      │  • children carry __parent_id (used by AutoMergingRetriever)│
 │      │                                                              │
 │  ChunkContextEnricher  (chunk_index, section_title, section_path)   │
 │      │                                                              │
-│  ContentAnalyzer  ◄── 1 LLM call / chunk (parallelised)             │
+│  ContentAnalyzer  ◄── 1 LLM call / chunk (async, parallelised)      │
 │      │  • context_prefix  (prepended before embedding)              │
 │      │  • summary, keywords, classification                         │
 │      │  • entities: orgs, persons, locations, dates, …              │
+│      │                                                              │
+│  [RaptorSummarizer]  ◄── RAPTOR_ENABLED  (section + doc summaries)  │
 │      │                                                              │
 │  SentenceTransformersDocumentEmbedder  (BAAI/bge-m3, local)         │
 │      │  dense vector (1024 dim)                                     │
@@ -38,32 +38,35 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 │  FastembedSparseDocumentEmbedder  (BM42/SPLADE, local ONNX)         │
 │      │  sparse vector                                               │
 │      │                                                              │
-│  QdrantDocumentStore  ───────────────────────────────────────────┐  │
-│                                                                  │  │
-└──────────────────────────────────────────────────────────────────┼──┘
-                                                                   │
-┌──────────────────────────────────────────────────────────────────┼──┐
-│                        RETRIEVAL PIPELINE                        │  │
-│                                                                  │  │
-│  User query                                                      │  │
-│      │                                                           │  │
-│  QueryAnalyzer  (LLM: decompose + extract metadata filters)      │  │
-│      │  ["What is X?", "How does Y work?"]                       │  │
-│      │                                                           │  │
-│  For each sub-question:                                          │  │
-│      ├─ SentenceTransformersTextEmbedder ──→ dense vector        │  │
-│      │       └──→ QdrantEmbeddingRetriever ◄─────────────────────┘  │
-│      │                                        │                     │
-│      └─ FastembedSparseTextEmbedder ──→ sparse vector               │
-│              └──→ QdrantSparseEmbeddingRetriever ◄──────────────────┘
+│  QdrantDocumentStore (children) ────────────────────────────────┐  │
+│  QdrantDocumentStore (parents)  ───────────────────────────────┐│  │
+│                                                                ││  │
+└────────────────────────────────────────────────────────────────┼┼──┘
+                                                                 ││
+┌────────────────────────────────────────────────────────────────┼┼──┐
+│                        RETRIEVAL PIPELINE                      ││  │
+│                                                                ││  │
+│  User query                                                    ││  │
+│      │                                                         ││  │
+│  QueryAnalyzer  (LLM: decompose + extract metadata filters)    ││  │
+│      │  ["What is X?", "How does Y work?"]                     ││  │
+│      │                                                         ││  │
+│  For each sub-question:                                        ││  │
+│      ├─ SentenceTransformersTextEmbedder ──→ dense vector      ││  │
+│      │       └──→ QdrantEmbeddingRetriever ◄───────────────────┘│  │
+│      │                                        │                  │  │
+│      ├─ FastembedSparseTextEmbedder ──→ sparse vector            │  │
+│      │       └──→ QdrantSparseEmbeddingRetriever ◄───────────────┘  │
+│      │                                        │
+│      └─ [HyDEGenerator → dense] (HYDE_ENABLED=true)
 │                                        │
 │  DocumentJoiner  (Reciprocal Rank Fusion)
 │      │
-│  ColBERTReranker  (colbert-ir/colbertv2.0, optional)  ← fast pre-filter → top 20
+│  AutoMergingRetriever  ← parent-context swap (threshold-based)
 │      │
-│  SentenceTransformersSimilarityRanker  (BAAI/bge-reranker-v2-m3, local)  ← final → top 5
+│  [ColBERTReranker]  (COLBERT_ENABLED)  ← pre-filter → top 20
 │      │
-│  swap_to_parent_content()  ← replace child chunks with full section text
+│  SentenceTransformersSimilarityRanker  (BAAI/bge-reranker-v2-m3)  ← final → top 5
 │      │
 │  PromptBuilder  (multi-question aware Jinja2 template)
 │      │
@@ -153,9 +156,12 @@ uv sync                    # reinstall everything from pyproject.toml + uv.lock
 curl -X POST http://localhost:8000/documents/index \
   -F "file=@my_document.pdf"
 
-# Response:
-# { "indexed": 42, "source": "my_document.pdf", "minio_url": "http://localhost:9000/rag-docs/abcd1234-my_document.pdf" }
-# minio_url is null if MinIO is not configured/available
+# Response (HTTP 202 — indexing runs async):
+# { "task_id": "3fa85f64-...", "source": "my_document.pdf", "message": "Ingestion started. Poll /tasks/{task_id} for progress." }
+
+# Poll for status:
+curl http://localhost:8000/tasks/3fa85f64-...
+# { "status": "done", "step": "done", "result": { "indexed": 42, "source": "my_document.pdf", "minio_url": "..." } }
 ```
 
 ### 5. Query
@@ -242,7 +248,6 @@ RAG/
 ├── pyproject.toml         ← dependencies (managed with uv)
 ├── main.py                ← FastAPI lifespan: pipelines + MinIO + QueryAnalyzer init
 ├── config.py              ← pydantic-settings (all feature flags)
-├── SCHEMA.md              ← metadata field specification
 ├── README.md              ← this file
 ├── docs/
 │   └── architecture.md   ← design decisions & advanced RAG patterns
@@ -252,7 +257,7 @@ RAG/
 ├── components/
 │   ├── docling_converter.py     ← PDF/DOCX → markdown (gradio_client)
 │   ├── metadata_enricher.py     ← doc-level metadata + language detection
-│   ├── parent_child_splitter.py ← child chunks (RecursiveDocumentSplitter) + parent_content
+│   ├── parent_child_splitter.py ← HierarchicalDocumentSplitter: children + parents collections
 │   ├── chunk_enricher.py        ← chunk position, section_path, chunk_type heuristic
 │   ├── content_analyzer.py      ← LLM: context_prefix + summary + keywords + NER
 │   ├── raptor_summarizer.py     ← RAPTOR section + doc-level summary chunks

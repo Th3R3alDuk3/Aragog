@@ -1,15 +1,16 @@
-from config import Settings
-from haystack.components.generators import OpenAIGenerator
-from haystack.utils import Secret, ComponentDevice
-from haystack.components.rankers import SentenceTransformersSimilarityRanker
 from haystack.components.embedders import (
     SentenceTransformersDocumentEmbedder,
     SentenceTransformersTextEmbedder,
 )
+from haystack.components.generators import OpenAIGenerator
+from haystack.components.rankers import SentenceTransformersSimilarityRanker
+from haystack.utils import ComponentDevice, Secret
 from haystack_integrations.components.embedders.fastembed import (
     FastembedSparseDocumentEmbedder,
-    FastembedSparseTextEmbedder
+    FastembedSparseTextEmbedder,
 )
+
+from config import Settings
 
 
 def _onnx_providers(device: str) -> list[str]:

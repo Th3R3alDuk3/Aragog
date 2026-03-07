@@ -43,12 +43,14 @@ Qdrant's own multilingual sparse model, instead of English-only SPLADE.
 ## 2. Hybrid Search with Reciprocal Rank Fusion
 
 ```
-Query → [Dense retriever: top-20] + [Sparse retriever: top-20]
+Query → [Dense retriever: top-30] + [Sparse retriever: top-30] + [HyDE dense: top-30]
                                     ↓
                               RRF fusion
                          score(d) = Σ 1 / (k + rank_i(d))
                                     ↓
-                         Merged ranked list (top-20)
+                       AutoMergingRetriever (parent-context swap)
+                                    ↓
+                  [ColBERT pre-filter: top-20]  ← COLBERT_ENABLED
                                     ↓
                          Cross-encoder reranker (top-5)
 ```
@@ -97,30 +99,25 @@ The original text is preserved in `meta["original_content"]` for display.
 **Problem**: small chunks → precise retrieval.  Large chunks → rich LLM context.
 These goals conflict.
 
-**Solution**: store both.
-- **Child chunk** (≈200 words): what gets embedded and retrieved.  Precise.
-- **Parent content** (full markdown section): passed to the LLM. Rich context.
+**Solution**: store both, retrieve small, answer with large.
+- **Child chunk** (≈200 words, `__level=2`): embedded and stored in the children
+  collection for dense + sparse retrieval.  Precise retrieval signal.
+- **Parent chunk** (≈600 words, `__level=1`): stored in the parents collection.
+  Fetched at query time by `AutoMergingRetriever` when enough siblings are retrieved.
 
-Current implementation: `ParentChildSplitter` stores `meta["parent_content"]` in
-each child document.  `swap_to_parent_content()` in the query layer substitutes
-parent text for child text before building the LLM prompt.  Only child documents
-are written to Qdrant (no separate parent index entries needed).
-
-**Alternative (Haystack built-in)**: `HierarchicalDocumentSplitter` (available since
-Haystack 2.7, current: 2.25.1) creates a formal parent-child tree using `__parent_id` / `__children_ids`
-metadata.  In combination with `AutoMergingRetriever` it retrieves parent documents
-automatically when enough children match (threshold-based merging).  This approach
-requires indexing both parent AND child documents and a more complex query pipeline.
-It is the recommended path for a future refactor.
+**Implementation**: `ParentChildSplitter` wraps Haystack's `HierarchicalDocumentSplitter`.
+Each child carries `meta["__parent_id"]`.  `AutoMergingRetriever` in the retrieval
+pipeline uses this to swap the child set for the parent document automatically
+(threshold-based merging, `AUTO_MERGE_THRESHOLD`).  Both parent and child documents
+are written to separate Qdrant collections at indexing time.
 
 ### 3c. Heading-aware Semantic Splitting
 
 Docling produces well-structured markdown with H1/H2/H3 headings.
-`MarkdownHeaderSplitter` (built-in Haystack) splits at every heading boundary,
-sets `meta["header"]` and `meta["parent_headers"]` per section, and never cuts
-across semantic boundaries.  Oversized sections are then further split by
-`ParentChildSplitter` using `RecursiveDocumentSplitter` (also built-in Haystack)
-which tries progressively finer boundaries (`\n\n` → sentence → `\n` → space).
+`HierarchicalDocumentSplitter` (Haystack built-in, used inside `ParentChildSplitter`)
+splits documents into word-based chunks and preserves heading structure in
+`meta["__header"]` and `meta["__parent_headers"]` per chunk.  `ChunkEnricher` reads
+these to populate `section_title` and `section_path` on every child chunk.
 
 ---
 
@@ -147,7 +144,8 @@ QueryAnalyzer (LLM)
                                                          │
                                               merge + deduplicate
                                                          │
-                                              swap to parent content
+                                   (AutoMergingRetriever handles parent-context swap
+                                    inside the retrieval pipeline per sub-question)
                                                          │
                                          single LLM call addressing both questions
 ```
@@ -245,8 +243,8 @@ at a small quality cost (English only).
 |---------|--------|-------|
 | Hybrid retrieval (dense + sparse + RRF) | ✅ | BAAI/bge-m3 dense + BM42 sparse → RRF fusion |
 | Cross-encoder reranking | ✅ | BAAI/bge-reranker-v2-m3, local, applied to top-K RRF candidates |
-| ColBERT second-pass reranker | ✅ | colbert-ir/colbertv2.0 via pylate, optional (`COLBERT_ENABLED`) |
-| HyDE (Hypothetical Document Embeddings) | ✅ | Adds second dense branch in retrieval pipeline (`HYDE_ENABLED`) |
+| ColBERT pre-filter (before cross-encoder) | ✅ | colbert-ir/colbertv2.0 via pylate, optional (`COLBERT_ENABLED`) |
+| HyDE (Hypothetical Document Embeddings) | ✅ | Second dense branch in retrieval pipeline (`HYDE_ENABLED`) |
 | RAPTOR (multi-level summaries) | ✅ | Section + doc-level summary chunks, ThreadPoolExecutor (`RAPTOR_ENABLED`) |
 | CRAG (Corrective RAG) | ✅ | Score-threshold retry loop + LLM query reformulation (`CRAG_ENABLED`) |
 | Streaming responses (SSE) | ✅ | `POST /query/stream` — `token`, `sources`, `done` events |
@@ -260,7 +258,7 @@ at a small quality cost (English only).
 | Graph RAG | ❌ | Knowledge graph for entity-relationship queries |
 | Multi-modal (image/table extraction) | ⚠️ | docling extracts tables as markdown; images → placeholder text |
 | SPLADE multilingual | ⚠️ | BM42 is an approximation; true multilingual SPLADE pending |
-| HierarchicalDocumentSplitter | ⚠️ | Future: replace ParentChildSplitter + swap_to_parent_content with Haystack built-ins |
+| HierarchicalDocumentSplitter + AutoMergingRetriever | ✅ | ParentChildSplitter uses HierarchicalDocumentSplitter; AutoMergingRetriever handles parent-context swap |
 | Async pipeline execution | ⚠️ | Indexing components are sync; run in thread-pool executor |
 | Query result caching | ❌ | No Redis/in-memory cache for repeated identical queries |
 | End-to-end test coverage | ⚠️ | Integration tests with real Qdrant + LLM backend pending |

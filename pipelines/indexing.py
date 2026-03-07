@@ -1,8 +1,8 @@
-from haystack.core.pipeline.async_pipeline import AsyncPipeline
-from haystack.utils import Secret
-from haystack.components.preprocessors import DocumentCleaner, MarkdownHeaderSplitter
+from haystack.components.preprocessors import DocumentCleaner
 from haystack.components.writers import DocumentWriter
+from haystack.core.pipeline.async_pipeline import AsyncPipeline
 from haystack.document_stores.types import DuplicatePolicy
+from haystack.utils import Secret
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from components.chunk_enricher import ChunkEnricher
@@ -17,20 +17,12 @@ from pipelines._factories import (
 )
 
 
-def build_document_store(
-        settings: Settings,
-) -> QdrantDocumentStore:
-    """
-    Create and return the QdrantDocumentStore.
-
-    ``use_sparse_embeddings=True`` tells Qdrant to create a named-vector
-    collection that holds both dense and sparse vectors per document —
-    enabling true hybrid retrieval in a single query.
-    """
+def build_children_store(settings: Settings) -> QdrantDocumentStore:
+    """Children collection — dense + sparse vectors, hybrid retrieval target."""
     return QdrantDocumentStore(
         url=settings.qdrant_url,
         api_key=Secret.from_token(settings.qdrant_api_key),
-        index=settings.qdrant_collection,
+        index=settings.qdrant_children_collection,
         embedding_dim=settings.embedding_dimension,
         use_sparse_embeddings=True,
         similarity="cosine",
@@ -38,11 +30,30 @@ def build_document_store(
     )
 
 
+def build_parents_store(settings: Settings) -> QdrantDocumentStore:
+    """Parents collection — dense vectors only; fetched by ID at query time."""
+    return QdrantDocumentStore(
+        url=settings.qdrant_url,
+        api_key=Secret.from_token(settings.qdrant_api_key),
+        index=settings.qdrant_parents_collection,
+        embedding_dim=settings.embedding_dimension,
+        use_sparse_embeddings=False,
+        similarity="cosine",
+        recreate_index=False,
+    )
+
+
 def build_indexing_pipeline(
         settings: Settings,
-) -> tuple[AsyncPipeline, QdrantDocumentStore]:
+) -> tuple[AsyncPipeline, QdrantDocumentStore, QdrantDocumentStore]:
+    """Build the indexing pipeline and both Qdrant document stores.
 
-    document_store = build_document_store(settings)
+    Returns:
+        (pipeline, children_store, parents_store)
+    """
+
+    children_store = build_children_store(settings)
+    parents_store  = build_parents_store(settings)
 
     # --- Stage 1: conversion ---
     converter = DoclingConverter(docling_url=settings.docling_url)
@@ -62,22 +73,21 @@ def build_indexing_pipeline(
         remove_repeated_substrings=False,
     )
 
-    # --- Stage 4: semantic heading-aware split ---
-    header_splitter = MarkdownHeaderSplitter(
-        keep_headers=True,
-        skip_empty_documents=True,
-    )
-
-    # --- Stage 5: parent-child linking ---
+    # --- Stage 4: parent-child linking via HierarchicalDocumentSplitter ---
+    # Outputs: children (→ enrich/analyze/embed branch)
+    #          parents  (→ embed + write to parents collection)
     parent_child_splitter = ParentChildSplitter(
+        parent_chunk_size=settings.parent_chunk_size,
         child_chunk_size=settings.child_chunk_size,
         child_chunk_overlap=settings.child_chunk_overlap,
     )
 
-    # --- Stage 6: chunk-level structural metadata ---
+    # --- Children branch ---
+
+    # Stage 5: chunk-level structural metadata
     chunk_enricher = ChunkEnricher()
 
-    # --- Stage 7: contextual prefix + semantic metadata (one LLM call/chunk) ---
+    # Stage 6: contextual prefix + semantic metadata (one LLM call/chunk)
     analyzer = ContentAnalyzer(
         openai_api_key=settings.openai_api_key,
         llm_model=settings.effective_instruct_model,
@@ -88,7 +98,7 @@ def build_indexing_pipeline(
         doc_beginning_chars=settings.doc_beginning_chars,
     )
 
-    # --- Stage 8 (optional): RAPTOR multi-level summaries ---
+    # Stage 8 (optional): RAPTOR multi-level summaries
     raptor = None
     if settings.raptor_enabled:
         from components.raptor_summarizer import RaptorSummarizer
@@ -99,15 +109,23 @@ def build_indexing_pipeline(
             max_workers=settings.analyzer_max_concurrency,
         )
 
-    # --- Stage 9: dense embedding ---
+    # Stage 9: dense embedding (children)
     dense_embedder = build_document_embedder(settings)
 
-    # --- Stage 10: sparse embedding (SPLADE / BM42) ---
+    # Stage 10: sparse embedding (children)
     sparse_embedder = build_sparse_document_embedder(settings)
 
-    # --- Stage 11: write ---
-    writer = DocumentWriter(
-        document_store=document_store,
+    # Stage 11: write children
+    children_writer = DocumentWriter(
+        document_store=children_store,
+        policy=DuplicatePolicy.OVERWRITE,
+    )
+
+    # --- Parents branch ---
+
+    # Stage P1: write parents (no embedding needed — AutoMergingRetriever fetches by ID)
+    parents_writer = DocumentWriter(
+        document_store=parents_store,
         policy=DuplicatePolicy.OVERWRITE,
     )
 
@@ -115,28 +133,32 @@ def build_indexing_pipeline(
     pipeline.add_component("converter",             converter)
     pipeline.add_component("meta_enricher",         meta_enricher)
     pipeline.add_component("cleaner",               cleaner)
-    pipeline.add_component("header_splitter",       header_splitter)
     pipeline.add_component("parent_child_splitter", parent_child_splitter)
+    # children branch
     pipeline.add_component("chunk_enricher",        chunk_enricher)
     pipeline.add_component("analyzer",              analyzer)
     if raptor:
-        pipeline.add_component("raptor", raptor)
+        pipeline.add_component("raptor",            raptor)
     pipeline.add_component("dense_embedder",        dense_embedder)
     pipeline.add_component("sparse_embedder",       sparse_embedder)
-    pipeline.add_component("writer",                writer)
+    pipeline.add_component("children_writer",       children_writer)
+    # parents branch
+    pipeline.add_component("parents_writer",        parents_writer)
 
-    pipeline.connect("converter.documents",             "meta_enricher.documents")
-    pipeline.connect("meta_enricher.documents",         "cleaner.documents")
-    pipeline.connect("cleaner.documents",               "header_splitter.documents")
-    pipeline.connect("header_splitter.documents",       "parent_child_splitter.documents")
-    pipeline.connect("parent_child_splitter.documents", "chunk_enricher.documents")
-    pipeline.connect("chunk_enricher.documents",        "analyzer.documents")
+    pipeline.connect("converter.documents",                    "meta_enricher.documents")
+    pipeline.connect("meta_enricher.documents",                "cleaner.documents")
+    pipeline.connect("cleaner.documents",                      "parent_child_splitter.documents")
+    # children branch
+    pipeline.connect("parent_child_splitter.children",         "chunk_enricher.documents")
+    pipeline.connect("chunk_enricher.documents",               "analyzer.documents")
     if raptor:
-        pipeline.connect("analyzer.documents",          "raptor.documents")
-        pipeline.connect("raptor.documents",            "dense_embedder.documents")
+        pipeline.connect("analyzer.documents",                 "raptor.documents")
+        pipeline.connect("raptor.documents",                   "dense_embedder.documents")
     else:
-        pipeline.connect("analyzer.documents",          "dense_embedder.documents")
-    pipeline.connect("dense_embedder.documents",        "sparse_embedder.documents")
-    pipeline.connect("sparse_embedder.documents",       "writer.documents")
+        pipeline.connect("analyzer.documents",                 "dense_embedder.documents")
+    pipeline.connect("dense_embedder.documents",               "sparse_embedder.documents")
+    pipeline.connect("sparse_embedder.documents",              "children_writer.documents")
+    # parents branch (no embedding — stored by ID only)
+    pipeline.connect("parent_child_splitter.parents",          "parents_writer.documents")
 
-    return pipeline, document_store
+    return pipeline, children_store, parents_store

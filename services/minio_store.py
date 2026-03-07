@@ -16,10 +16,10 @@ Configuration (via .env):
 """
 
 from logging import getLogger
-from minio import Minio
 from pathlib import Path
 from urllib.parse import quote
 
+from minio import Minio
 
 logger = getLogger(__name__)
 

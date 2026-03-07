@@ -1,6 +1,6 @@
 # Pipelines
 
-Haystack 2.x pipeline definitions for ingestion and retrieval.
+Haystack 2.x pipeline definitions for indexing and retrieval.
 
 ---
 
@@ -8,15 +8,21 @@ Haystack 2.x pipeline definitions for ingestion and retrieval.
 
 | File | Purpose |
 |------|---------|
-| `ingestion.py` | Ingestion pipeline (10 core stages + optional RAPTOR): document conversion → Qdrant write |
-| `retrieval.py` | Query pipeline builders: retrieval DAG (dual retrieval → RRF → reranker) + generation DAG (prompt → LLM → answer) |
+| `indexing.py` | Indexing pipeline (11 stages + optional RAPTOR): document conversion → Qdrant write |
+| `retrieval.py` | Hybrid retrieval pipeline: dense + sparse + HyDE → RRF → AutoMerge → ColBERT → cross-encoder |
+| `generation.py` | Generation pipeline: PromptBuilder → OpenAIGenerator → AnswerBuilder |
 | `_factories.py` | Factory functions for embedder/reranker/generator components |
 
 ---
 
-## Ingestion Pipeline
+## Indexing Pipeline
 
-Defined in `build_ingestion_pipeline(settings)`. Returns `(Pipeline, QdrantDocumentStore)`.
+Defined in `build_indexing_pipeline(settings)`.
+Returns `(pipeline, children_store, parents_store)`.
+
+Two separate Qdrant collections are used:
+- `children_store` — dense + sparse vectors, retrieval target
+- `parents_store` — no vectors, fetched by `__parent_id` via `AutoMergingRetriever`
 
 ### Stage-by-stage flow
 
@@ -31,48 +37,53 @@ PDF / DOCX / PPTX
       │   doc_id (SHA-256), title, word_count
       │   indexed_at / indexed_at_ts (for date filters)
       │   language (langdetect on full doc)
-      │   doc_beginning (first N chars for context LLM)
+      │   doc_beginning (first N chars for ContentAnalyzer LLM context)
       │   embedding provenance fields
       │
   3. DocumentCleaner  [Haystack built-in]
       │   normalise whitespace, remove empty lines
       │
-  4. MarkdownHeaderSplitter  [Haystack built-in]
-      │   split at H1-H6 heading boundaries
-      │   each section = one semantically coherent topic
-      │   meta["header"] and meta["parent_headers"] set per section
+  4. ParentChildSplitter  ← wraps HierarchicalDocumentSplitter
+      │   level 1 (parent chunks, ~PARENT_CHUNK_SIZE words) → parents branch
+      │   level 2 (child chunks, ~CHILD_CHUNK_SIZE words)  → children branch
+      │   children carry meta["__parent_id"] used by AutoMergingRetriever
       │
-  5. ParentChildSplitter
-      │   RecursiveDocumentSplitter (sentence-boundary) → child chunks (200 words)
-      │   stores full section as meta["parent_content"] in each child
-      │   enables: retrieve small (precise), answer with large (rich context)
+      ├─────────────────────────────────────────────────────────
+      │  PARENTS BRANCH
       │
-  6. ChunkContextEnricher
+      │  P1. DocumentWriter → parents_store (no embedding, fetched by __parent_id)
+      │
+      ├─────────────────────────────────────────────────────────
+      │  CHILDREN BRANCH
+      │
+  5. ChunkContextEnricher
       │   chunk_index, chunk_total
-      │   section_title, section_path (heading breadcrumb)
+      │   section_title, section_path (heading breadcrumb from __header/__parent_headers)
       │   chunk_type (text | table | code | list | figure_caption)
       │
-  7. ContentAnalyzer  [1 LLM call per chunk, parallelised]
-      │   context_prefix → prepended before embedding (Contextual Retrieval)
-      │   summary, keywords, classification, entities
-      │   original_content stored in meta (for display)
+  6. ContentAnalyzer  [1 async LLM call per chunk, parallelised via asyncio.gather]
+      │   context_prefix → prepended before embedding (Anthropic Contextual Retrieval)
+      │   summary, keywords, classification, entities (persons, orgs, locations, …)
+      │   original_content stored in meta (for display / citation)
       │   doc_beginning removed from meta (not written to Qdrant)
       │
-  8. [RaptorSummarizer]  ← OPTIONAL: RAPTOR_ENABLED=true
+  7. [RaptorSummarizer]  ← OPTIONAL: RAPTOR_ENABLED=true
       │   groups chunks by doc_id → section_path
       │   LLM synthesises section summary → raptor_section chunk
       │   LLM synthesises document summary → raptor_doc chunk
       │   all levels embedded + stored → enables high-level retrieval
       │
-  9. SentenceTransformersDocumentEmbedder  [HuggingFace, local]
-      │   embeds: context_prefix + section_title + chunk_content
+  8. SentenceTransformersDocumentEmbedder  [HuggingFace, local]
+      │   embeds: context_prefix prepended to chunk_content (by ContentAnalyzer)
+      │   plus meta_fields_to_embed: section_title, title, summary, keywords, entities
       │   1024-dimensional normalised dense vector (BAAI/bge-m3)
       │
- 10. FastembedSparseDocumentEmbedder  [local ONNX]
+  9. FastembedSparseDocumentEmbedder  [local ONNX]
       │   sparse vector over vocabulary (BM42 / SPLADE)
+      │   same meta_fields_to_embed as dense embedder
       │
- 11. DocumentWriter
-          writes to QdrantDocumentStore
+ 10. DocumentWriter
+          writes children to children_store (QdrantDocumentStore)
           DuplicatePolicy.OVERWRITE (same IDs are overwritten)
 ```
 
@@ -88,86 +99,88 @@ else:
 
 ### Qdrant collection setup
 
-`build_document_store(settings)` creates a `QdrantDocumentStore` with:
+`build_children_store(settings)` — dense + sparse vectors, retrieval target:
 - `use_sparse_embeddings=True` — named-vector collection (dense + sparse per doc)
 - `similarity="cosine"`
 - `recreate_index=False` — safe for re-indexing existing collection
 
-The document store is returned alongside the pipeline so `main.py` can pass the
-same instance to `build_retrieval_pipeline()` — no duplicate Qdrant connections.
+`build_parents_store(settings)` — parent chunks, no vectors:
+- `use_sparse_embeddings=False`
+- fetched by `__parent_id` via `AutoMergingRetriever` at query time
+
+Both stores are returned alongside the pipeline so `main.py` can pass the same instances to `build_retrieval_pipeline()`.
 
 ---
 
 ## Retrieval Pipeline
 
-Defined in `build_retrieval_pipeline(settings, document_store)`.
-Returns `(retrieval_pipeline, generation_pipeline)`.
+Defined in `build_retrieval_pipeline(settings, children_store, parents_store)`.
+Returns one `AsyncPipeline`.
 
-**Note:** Multi-question decomposition, HyDE, CRAG, and ColBERT reranking are handled
-at the **router layer** (`routers/query.py`), not inside this pipeline. The pipeline
-handles a single sub-question at a time.
+**Multi-question decomposition, CRAG, and filter building are handled in the service layer
+(`services/query.py`). The pipeline handles a single sub-question at a time.**
 
 ### Flow
 
 ```
-Retrieval pipeline (one sub-question)
+Query text (one sub-question)
       │
       ├─ SentenceTransformersTextEmbedder ──→ dense vector (1024-dim)
       │         ↓
       │   QdrantEmbeddingRetriever ──────────→ top-K dense matches
       │
-      └─ FastembedSparseTextEmbedder ──→ sparse vector
-                ↓
-        QdrantSparseEmbeddingRetriever ──→ top-K sparse matches
+      ├─ FastembedSparseTextEmbedder ──→ sparse vector
+      │         ↓
+      │   QdrantSparseEmbeddingRetriever ──→ top-K sparse matches
+      │
+      └─ [HyDE branch, HYDE_ENABLED=true]
+                HyDEGenerator (LLM → hypothetical passage)
+                    ↓
+                SentenceTransformersTextEmbedder (hyde)
+                    ↓
+                QdrantEmbeddingRetriever (hyde) ──→ top-K dense matches
                          │
-                DocumentJoiner (RRF)
-                    merge without score normalisation
-                    documents in both lists are boosted
+              DocumentJoiner (Reciprocal Rank Fusion)
+                  merge without score normalisation
+                  documents in multiple lists are boosted
                          │
-          SentenceTransformersSimilarityRanker
-                    cross-encoder (BAAI/bge-reranker-v2-m3)
-                    re-scores top candidates jointly
+              AutoMergingRetriever
+                  if ≥ threshold fraction of a parent's children are retrieved
+                  → replaces child set with the parent document (richer context)
                          │
-                    retrieved documents
+              [ColBERTReranker — COLBERT_ENABLED=true]
+                  token-level late-interaction pre-filter
+                  reduces to COLBERT_TOP_K (default 20) candidates
+                         │
+              SentenceTransformersSimilarityRanker
+                  cross-encoder (BAAI/bge-reranker-v2-m3)
+                  jointly re-scores top candidates
+                  → final RERANKER_TOP_K documents (default 5)
+```
 
-Router layer
-  - merge/deduplicate across sub-questions
-  - swap_to_parent_content()
-  - optional ColBERT rerank
-  - final context cut to top_k
+---
 
-Generation pipeline
-  documents + questions
+## Generation Pipeline
+
+Defined in `build_generation_pipeline(settings)`.
+Returns one `AsyncPipeline`.
+
+```
+documents + questions (runtime inputs)
        │
-   PromptBuilder (Jinja2)
+   PromptBuilder (RAG_PROMPT Jinja2 template)
        │
-   OpenAIGenerator
+   OpenAIGenerator  (any OpenAI-compatible endpoint)
        │
    AnswerBuilder
        → answer + source documents
 ```
 
-### `swap_to_parent_content(documents)`
-
-Utility function applied at the router layer (not inside the pipeline):
-
-```python
-from pipelines.retrieval_pipeline import swap_to_parent_content
-
-merged_docs = swap_to_parent_content(list(all_docs_by_id.values()))
-```
-
-Replaces each retrieved child chunk's `content` with `meta["parent_content"]`
-(the full section markdown). Deduplicates by first 200 chars of parent content
-so the same section is only sent to the LLM once.
-
-### RAG Prompt
-
-`RAG_PROMPT` is a module-level Jinja2 template string in `retrieval_pipeline.py`.
+`RAG_PROMPT` is a module-level Jinja2 template string in `generation.py`.
 It is imported directly by `routers/stream.py` for SSE streaming:
 
 ```python
-from pipelines.retrieval_pipeline import RAG_PROMPT
+from pipelines.generation import RAG_PROMPT
 from jinja2 import Environment
 prompt_text = Environment().from_string(RAG_PROMPT).render(documents=..., questions=...)
 ```
@@ -178,9 +191,9 @@ prompt_text = Environment().from_string(RAG_PROMPT).render(documents=..., questi
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `build_document_embedder(settings)` | `SentenceTransformersDocumentEmbedder` | Dense, for ingestion |
+| `build_document_embedder(settings)` | `SentenceTransformersDocumentEmbedder` | Dense, for indexing |
 | `build_text_embedder(settings)` | `SentenceTransformersTextEmbedder` | Dense, for retrieval |
-| `build_sparse_document_embedder(settings)` | `FastembedSparseDocumentEmbedder` | Sparse, for ingestion |
+| `build_sparse_document_embedder(settings)` | `FastembedSparseDocumentEmbedder` | Sparse, for indexing |
 | `build_sparse_text_embedder(settings)` | `FastembedSparseTextEmbedder` | Sparse, for retrieval |
 | `build_reranker(settings)` | `SentenceTransformersSimilarityRanker` | Cross-encoder |
 | `build_generator(settings)` | `OpenAIGenerator` | OpenAI-compatible LLM |
@@ -197,12 +210,17 @@ All factories read from `Settings` (populated from `.env`) and require no argume
 | `EMBEDDING_DIMENSION` | `1024` | Vector size — must match model |
 | `SPARSE_EMBEDDING_MODEL` | `Qdrant/bm42-all-minilm-l6-v2-attentions` | BM42 ONNX model |
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Cross-encoder (HuggingFace) |
-| `RERANKER_TOP_K` | `5` | Documents returned by reranker |
-| `DENSE_RETRIEVER_TOP_K` | `20` | Dense retriever candidates |
-| `SPARSE_RETRIEVER_TOP_K` | `20` | Sparse retriever candidates |
+| `RERANKER_TOP_K` | `5` | Documents returned by cross-encoder |
+| `DENSE_RETRIEVER_TOP_K` | `30` | Dense retriever candidates |
+| `SPARSE_RETRIEVER_TOP_K` | `30` | Sparse retriever candidates |
+| `PARENT_CHUNK_SIZE` | `600` | Words per parent chunk |
 | `CHILD_CHUNK_SIZE` | `200` | Words per child chunk |
 | `CHILD_CHUNK_OVERLAP` | `20` | Word overlap between child chunks |
-| `ANALYZER_MAX_WORKERS` | `4` | Parallel ContentAnalyzer threads (uses `LLM_MODEL`) |
-| `RAPTOR_ENABLED` | `false` | Enable RAPTOR summary chunks |
-| `QDRANT_URL` | `http://localhost:6333` | Qdrant server URL |
-| `QDRANT_COLLECTION` | `documents` | Collection name |
+| `ANALYZER_MAX_CONCURRENCY` | `8` | Parallel ContentAnalyzer async tasks |
+| `AUTO_MERGE_THRESHOLD` | `0.5` | AutoMergingRetriever threshold |
+| `HYDE_ENABLED` | `true` | Enable HyDE second dense branch |
+| `COLBERT_ENABLED` | `true` | Enable ColBERT pre-filter |
+| `COLBERT_TOP_K` | `20` | Candidates after ColBERT pre-filter |
+| `RAPTOR_ENABLED` | `true` | Enable RAPTOR summary chunks |
+| `QDRANT_CHILDREN_COLLECTION` | `children` | Children Qdrant collection name |
+| `QDRANT_PARENTS_COLLECTION` | `parants` | Parents Qdrant collection name |
