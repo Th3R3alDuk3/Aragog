@@ -4,6 +4,32 @@ Deep-dive into every design decision in this system.
 
 ---
 
+## 0. Runtime layout
+
+The backend is split into three layers:
+
+```text
+backend/
+  core/          framework-free logic, pipelines, services, storage
+  adapters/api/  FastAPI transport, HTTP schemas, routes
+  adapters/mcp/  FastMCP transport and tool registration
+```
+
+`RagRuntime` in `core/runtime.py` is the shared assembly root. Both adapters start the
+same runtime and use the same `QueryEngine`, `RetrievalEngine`, `IndexingService`,
+`MinioStore`, `QdrantStores`, and `TaskStore`.
+
+This means:
+- FastAPI and MCP do not proxy requests to each other
+- retrieval and generation logic live once in `core/services`
+- `download_url` stays adapter-specific in the HTTP layer
+- `adapters/mcp/server.py` is the MCP composition root and combines mounted
+  server lifespans with `combine_lifespans(...)`
+- indexing is started from `adapters/api/routes/documents.py` and still runs
+  in-process because `TaskStore` is in-memory and there is no separate queue yet
+
+---
+
 ## 1. Why Qdrant instead of pgvector
 
 ### pgvector limitations
@@ -88,7 +114,7 @@ is semantically ambiguous without context.  Which company? Which period?
 >
 > The margin improved to 23 %.
 
-This is done by `ContentAnalyzer` in a single LLM call per chunk.
+This is done by `ChunkAnalyzer` in a single LLM call per chunk.
 The `context_prefix` is prepended to `doc.content` before embedding.
 The original text is preserved in `meta["original_content"]` for display.
 
@@ -116,7 +142,7 @@ are written to separate Qdrant collections at indexing time.
 Docling produces well-structured markdown with H1/H2/H3 headings.
 `HierarchicalDocumentSplitter` (Haystack built-in, used inside `ParentChildSplitter`)
 splits documents into word-based chunks, but it does not emit heading metadata.
-`ChunkEnricher` therefore parses each chunk with a Markdown parser, carries a
+`ChunkAnnotator` therefore parses each chunk with a Markdown parser, carries a
 heading stack across consecutive chunks, and derives `section_title` /
 `section_path` from the parsed headings.
 
@@ -182,7 +208,7 @@ meta_fields_to_embed=[
     "ent_organizations", "ent_products", "ent_laws",
 ]
 ```
-`context_prefix` is already prepended to `doc.content` by `ContentAnalyzer`.
+`context_prefix` is already prepended to `doc.content` by `ChunkAnalyzer`.
 The effective embedded text is therefore the contextualized chunk text plus the
 listed structural / semantic metadata fields.
 
@@ -193,7 +219,7 @@ of the chunk — not just its raw text.
 
 ## 6. LLM calls during indexing
 
-### ContentAnalyzer: one call per chunk
+### ChunkAnalyzer: one call per chunk
 
 One structured JSON call generates all metadata in a single round-trip:
 
@@ -202,9 +228,7 @@ Input:  document title + beginning + section path + chunk text
 Output: context_prefix, summary, keywords, classification, entities
 ```
 
-Note: `language` is detected locally by `langdetect` in `MetadataEnricher` on
-the full document (before splitting) — no LLM call needed and more accurate than
-per-chunk detection.
+Note: `language`, `document_type`, `audience`, and date fields are extracted by `DocumentAnalyzer` via a single LLM call on the full document (before splitting).
 
 **Cost estimate (gpt-4o-mini)**:
 - ~480 input tokens per chunk (context + chunk; no language field saves ~20 tokens)
@@ -229,8 +253,8 @@ LLM in those cases.
 
 | Stage | Latency | Parallelism |
 |-------|---------|-------------|
-| DoclingConverter | 2-30s / file (depends on size) | per-file |
-| ContentAnalyzer (indexing) | ~1s / chunk | `ANALYZER_MAX_WORKERS` threads |
+| Docling | 2-30s / file (depends on size) | per-file |
+| ChunkAnalyzer (indexing) | ~1s / chunk | `ANALYZER_MAX_WORKERS` threads |
 | Dense embed (query) | ~50ms | — |
 | Sparse embed (query) | ~20ms | — |
 | Qdrant retrieval (dense + sparse) | ~5-20ms | parallel |
@@ -254,13 +278,13 @@ at a small quality cost (English only).
 | HyDE (Hypothetical Document Embeddings) | ✅ | Second dense branch in retrieval pipeline (`HYDE_ENABLED`) |
 | RAPTOR-inspired summaries | ✅ | Section + doc-level summary chunks, no clustering tree (`RAPTOR_ENABLED`) |
 | CRAG (Corrective RAG) | ✅ | Score-threshold retry loop + LLM query reformulation (`CRAG_ENABLED`) |
-| Streaming responses (SSE) | ✅ | `POST /query/stream` — `token`, `sources`, `done` events |
 | RAGAS evaluation | ✅ | Faithfulness, answer_relevancy, context_precision (`RAGAS_ENABLED`) |
 | MinIO object storage | ✅ | Stores original files; `minio_key` is stored in chunk metadata for backend-signed downloads |
-| Async task tracking | ✅ | HTTP 202 + GET /tasks/{task_id}; BoundedTaskStore evicts done/failed |
+| Async task tracking | ✅ | HTTP 202 + GET /tasks/{task_id}; TaskStore evicts finished tasks when full |
 | Re-indexing lifecycle | ✅ | Deletes stale chunks by stable `meta.doc_id` before writing fresh chunks |
 | Metadata filter robustness | ✅ | NL filter extraction via QueryAnalyzer; `meta.` prefix normalization; shorthand dict support |
-| Named Entity Recognition | ✅ | 8 entity types (persons, orgs, locations, dates, products, laws, events, quantities) via ContentAnalyzer |
+| Named Entity Recognition | ✅ | 8 entity types (persons, orgs, locations, dates, products, laws, events, quantities) via ChunkAnalyzer |
+| Separate worker process | ❌ | Indexing is started from `adapters/api/routes/documents.py`; no dedicated worker runtime or queue yet |
 | Self-RAG | ❌ | LLM self-evaluation of retrieved docs before generation |
 | Graph RAG | ❌ | Knowledge graph for entity-relationship queries |
 | Multi-modal (image/table extraction) | ⚠️ | docling extracts tables as markdown; images → placeholder text |

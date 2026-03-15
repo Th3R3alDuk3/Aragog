@@ -1,8 +1,10 @@
-# Advanced Hybrid RAG — FastAPI + Haystack + Qdrant
+# Advanced Hybrid RAG Backend
 
 This directory contains the complete backend. Run the commands in this README from inside `backend/`.
 
-Production-ready Retrieval-Augmented Generation backend with state-of-the-art retrieval quality.
+The backend exposes two thin adapters on top of one shared runtime:
+- FastAPI for uploads, downloads, task polling, query HTTP endpoints, and evaluation
+- FastMCP for `rag_query` and `rag_retrieve`
 
 ---
 
@@ -14,10 +16,10 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 │                                                                     │
 │  PDF/DOCX/…                                                         │
 │      │                                                              │
-│  DoclingConverter ──── v1 REST API ──→ docling-serve                │
+│  Docling ──── v1 REST API ──→ docling-serve                │
 │      │  (markdown)                                                  │
-│  MetadataEnricher  (doc_id, title, word_count, document_type,       │
-│      │              document_date/period, language via langdetect)  │
+│  DocumentAnalyzer  (doc_id, title, word_count, document_type,       │
+│      │              document_date/period, language via LLM)         │
 │  DocumentCleaner                                                    │
 │      │                                                              │
 │  ParentChildSplitter  ◄── HierarchicalDocumentSplitter               │
@@ -25,14 +27,14 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 │      │  • parents  (600 words) → parents  Qdrant collection        │
 │      │  • children carry __parent_id (used by AutoMergingRetriever)│
 │      │                                                              │
-│  ChunkEnricher  (chunk_index, section_title, section_path)          │
+│  ChunkAnnotator  (chunk_index, section_title, section_path)         │
 │      │                                                              │
-│  ContentAnalyzer  ◄── 1 LLM call / chunk (async, parallelised)      │
+│  ChunkAnalyzer  ◄── 1 LLM call / chunk (async, parallelised)        │
 │      │  • context_prefix  (prepended before embedding)              │
 │      │  • summary, keywords, classification                         │
 │      │  • entities: orgs, persons, locations, dates, …              │
 │      │                                                              │
-│  [RaptorSummarizer]  ◄── RAPTOR_ENABLED  (section + doc summaries)  │
+│  [RAPTOR]  ◄── RAPTOR_ENABLED  (section + doc summaries)  │
 │      │                                                              │
 │  SentenceTransformersDocumentEmbedder  (BAAI/bge-m3, local)         │
 │      │  dense vector (1024 dim)                                     │
@@ -60,13 +62,13 @@ Production-ready Retrieval-Augmented Generation backend with state-of-the-art re
 │      ├─ FastembedSparseTextEmbedder ──→ sparse vector            │  │
 │      │       └──→ QdrantSparseEmbeddingRetriever ◄───────────────┘  │
 │      │                                        │
-│      └─ [HyDEGenerator → dense] (HYDE_ENABLED=true)
+│      └─ [HyDE → dense] (HYDE_ENABLED=true)
 │                                        │
 │  DocumentJoiner  (Reciprocal Rank Fusion)
 │      │
 │  AutoMergingRetriever  ← parent-context swap (threshold-based)
 │      │
-│  [ColBERTReranker]  (COLBERT_ENABLED)  ← pre-filter → top 20
+│  [ColBERT]  (COLBERT_ENABLED)  ← pre-filter → top 20
 │      │
 │  SentenceTransformersSimilarityRanker  (BAAI/bge-reranker-v2-m3)  ← final → top 5
 │      │
@@ -91,7 +93,8 @@ AnswerBuilder
 
 | Component | Technology | Why |
 |-----------|-----------|-----|
-| API framework | FastAPI | Async, OpenAPI docs built-in |
+| API adapter | FastAPI | Async HTTP API with OpenAPI docs |
+| MCP adapter | FastMCP | MCP tools for query and retrieval |
 | RAG framework | Haystack 2.x | Type-safe pipeline DAG, production-ready |
 | Vector database | **Qdrant** | Native dense + sparse vectors, fast payload filtering |
 | Document extraction | **docling-serve** | Best-in-class PDF/DOCX/PPTX → markdown |
@@ -103,12 +106,12 @@ AnswerBuilder
 | LLM | **OpenAI-compatible** | Works with OpenAI, Ollama, vLLM, Groq, … |
 | Contextual chunking | **Anthropic Option A** | Contextual prefix + parent-child + word-count-based hierarchical split |
 | Multi-question | **QueryAnalyzer** | LLM detects compound queries + extracts metadata filters, retrieves per sub-question |
-| HyDE | **HyDEGenerator** | Hypothetical document for improved dense retrieval |
-| RAPTOR-inspired summaries | **RaptorSummarizer** | Hierarchical section + document summary chunks |
+| HyDE | **HyDE** | Hypothetical document for improved dense retrieval |
+| RAPTOR-inspired summaries | **RAPTOR** | Hierarchical section + document summary chunks |
 | CRAG | score-threshold retry loop | Corrective re-retrieval + LLM query reformulation |
 | Evaluation | **RAGAS** | Faithfulness, answer relevancy, context precision |
 | Object storage | **MinIO** | Stores original uploaded documents |
-| Task tracking | **BoundedTaskStore** | Async indexing with HTTP 202 + polling |
+| Task tracking | **TaskStore** | In-memory task state with bounded eviction of finished tasks |
 
 ---
 
@@ -142,12 +145,28 @@ uv python pin 3.13
 uv sync
 
 # Run the API server
-uv run python main.py
+uv run python main_api.py
+# or via the packaged entry point
+uv run advanced-rag-api
 # or with hot-reload:
-uv run uvicorn main:app --reload
+uv run uvicorn main_api:app --reload
 
 # API docs: http://localhost:8000/docs
 ```
+
+### 4. Start the MCP server
+
+```bash
+# FastMCP runs on stdio by default
+uv run python main_mcp.py
+# or via the packaged entry point
+uv run advanced-rag-mcp
+```
+
+`adapters/mcp/server.py` is the composition root for MCP. It mounts the query
+server from `adapters/mcp/servers/query.py` and combines its lifespan with
+`combine_lifespans(...)`, so the query tools run against the shared runtime
+without proxying through the HTTP API.
 
 ### Adding / updating packages
 
@@ -158,7 +177,7 @@ uv remove <package>        # remove a dependency
 uv sync                    # reinstall everything from pyproject.toml + uv.lock
 ```
 
-### 4. Index a document
+### 5. Index a document
 
 ```bash
 curl -X POST http://localhost:8000/documents/index \
@@ -181,7 +200,7 @@ curl http://localhost:8000/tasks/3fa85f64-...
 # }
 ```
 
-### 5. Query
+### 6. Query
 
 ```bash
 # Simple question
@@ -236,10 +255,18 @@ The system works with any **OpenAI-compatible** endpoint:
 | `POST` | `/documents/index` | Upload & index a document (async, HTTP 202 + task_id) |
 | `GET`  | `/tasks/{task_id}` | Poll indexing task progress |
 | `POST` | `/query` | Query the RAG system (multi-question, CRAG, ColBERT) |
-| `POST` | `/query/stream` | Streaming query via SSE (token / sources / done events) |
 | `POST` | `/evaluation/run` | RAGAS evaluation on a test set |
 | `GET`  | `/docs` | Interactive Swagger UI |
 | `GET`  | `/redoc` | ReDoc API documentation |
+
+---
+
+## MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `rag_query` | Answer a question with grounded sources |
+| `rag_retrieve` | Return relevant passages without generation |
 
 ---
 
@@ -252,6 +279,7 @@ PDF, DOCX, PPTX, XLSX, HTML, TXT, Markdown — all converted via docling-serve.
 ## Configuration reference
 
 See [.env](.env) for all settings with inline documentation.
+See [core/config.py](core/config.py) for the grouped settings model.
 See [docs/architecture.md](docs/architecture.md) for deep-dive on each design decision.
 See [docs/code_style.md](docs/code_style.md) for the backend coding standard.
 
@@ -259,45 +287,46 @@ See [docs/code_style.md](docs/code_style.md) for the backend coding standard.
 
 ## Project structure
 
-```
+```text
 backend/
 ├── docker-compose.yml     ← Qdrant + MinIO + docling-serve
 ├── .env                   ← all configuration
-├── pyproject.toml         ← dependencies (managed with uv)
-├── main.py                ← FastAPI lifespan: pipelines + MinIO + QueryAnalyzer init
-├── config.py              ← pydantic-settings (all feature flags)
+├── pyproject.toml         ← dependencies + console entry points
+├── main_api.py            ← thin local wrapper for the API adapter
+├── main_mcp.py            ← thin local wrapper for the MCP adapter
 ├── README.md              ← this file
 ├── docs/
-│   └── architecture.md   ← design decisions & advanced RAG patterns
-├── models/
-│   ├── api.py             ← Pydantic request/response models (Query, Task, Evaluation)
-│   └── meta.py            ← ChunkMetadata schema (all pipeline stages)
-├── components/
-│   ├── docling_converter.py     ← PDF/DOCX → markdown (docling-serve v1)
-│   ├── metadata_enricher.py     ← doc-level metadata + language detection + semantic dates
-│   ├── parent_child_splitter.py ← HierarchicalDocumentSplitter: children + parents collections
-│   ├── chunk_enricher.py        ← chunk position, section_path, chunk_type heuristic
-│   ├── content_analyzer.py      ← LLM: context_prefix + summary + keywords + NER
-│   ├── raptor_summarizer.py     ← RAPTOR section + doc-level summary chunks
-│   ├── hyde_generator.py        ← HyDE hypothetical document for dense retrieval
-│   ├── colbert_reranker.py      ← ColBERT late-interaction pre-filter (before cross-encoder)
-│   └── query_analyzer.py        ← multi-question decomposition + NL filter extraction
-├── pipelines/
-│   ├── indexing.py        ← 12-13 step flow (depends on RAPTOR) from conversion to Qdrant writes
-│   ├── retrieval.py       ← dense + sparse + HyDE → RRF → ColBERT (pre-filter) → cross-encoder
-│   ├── generation.py      ← PromptBuilder (RAG_PROMPT) → OpenAIGenerator → AnswerBuilder
-│   └── _factories.py      ← HF dense/sparse embedders, cross-encoder reranker, LLM
-├── routers/
-│   ├── documents.py       ← POST /documents/index (async, HTTP 202)
-│   ├── query.py           ← POST /query (multi-question, CRAG, ColBERT)
-│   ├── stream.py          ← POST /query/stream (SSE: token / sources / done)
-│   ├── evaluation.py      ← POST /evaluation/run (RAGAS)
-│   ├── tasks.py           ← GET /tasks/{task_id}
-│   └── _deps.py           ← FastAPI dependency injection from app.state
-└── services/
-    ├── indexing.py        ← pipeline orchestration, step-by-step, thread executor
-    ├── query.py           ← prepare_context, CRAG loop, filter building
-    ├── evaluation.py      ← RAGAS with LangChain wrappers (lazy import)
-    ├── minio_store.py     ← MinIO upload / URL / delete
-    └── tasks.py           ← BoundedTaskStore (evicts done/failed, HTTP 503 on overflow)
+│   ├── architecture.md    ← design decisions and runtime layout
+│   └── code_style.md      ← backend coding standard
+├── adapters/
+│   ├── api/
+│   │   ├── app.py         ← FastAPI app + lifespan
+│   │   ├── deps.py        ← adapter-local dependency accessors
+│   │   ├── models/        ← HTTP request/response models by domain
+│   │   └── routes/
+│   │       ├── documents.py  ← upload + in-process indexing task launch
+│   │       ├── evaluation.py
+│   │       ├── query.py
+│   │       └── tasks.py
+│   └── mcp/
+│       ├── server.py      ← main FastMCP server + lifespan composition
+│       └── servers/
+│           └── query.py   ← mounted query tools server + query lifespan
+├── core/
+│   ├── config.py          ← grouped settings model
+│   ├── runtime.py         ← shared RagRuntime for API and MCP
+│   ├── models/
+│   │   ├── evaluation.py
+│   │   ├── indexing.py
+│   │   ├── meta.py
+│   │   ├── query.py
+│   │   ├── retrieval.py
+│   │   └── tasks.py
+│   ├── components/        ← Haystack/OpenAI building blocks
+│   ├── pipelines/         ← indexing, retrieval, generation
+│   ├── services/          ← QueryEngine, RetrievalEngine, IndexingService, Evaluation
+│   └── storage/           ← MinIO, Qdrant, TaskStore
 ```
+
+Indexing is currently launched from `adapters/api/routes/documents.py` and still runs
+in-process. A fully separate worker process would need a persistent queue or task store.

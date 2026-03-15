@@ -1,7 +1,7 @@
 [project]
 name = "advanced-rag"
 version = "0.1.0"
-description = "Advanced Hybrid RAG — FastAPI + Haystack + Qdrant"
+description = "Advanced Hybrid RAG backend with shared core runtime for API and MCP"
 requires-python = ">=3.13"
 dependencies = [
     # Core framework
@@ -9,8 +9,8 @@ dependencies = [
     "fastapi-offline>=1.7.0",
     "uvicorn[standard]>=0.32.0",
     "python-multipart>=0.0.12",
-    # MCP server for exposing the query capability to MCP clients
-    "mcp[cli]>=1.26.0",
+    # FastMCP server for exposing the query capability to MCP clients
+    "fastmcp>=3.0.0",
     # Haystack 2.x  —  2.25.1 is the current stable release (Feb 2026)
     # SentenceTransformersSimilarityRanker (replaces deprecated TransformersSimilarityRanker)
     # was introduced in 2.9.  HierarchicalDocumentSplitter available since 2.7.
@@ -24,8 +24,6 @@ dependencies = [
     "pydantic>=2.0",
     # HTTP client for docling-serve v1 API
     "httpx>=0.27.0",
-    # Explicit runtime dependency for SSE prompt rendering
-    "jinja2>=3.1.0",
     # HuggingFace — dense embeddings + cross-encoder reranker (local inference)
     "sentence-transformers>=3.0.0",
     "transformers>=4.40.0",
@@ -33,15 +31,10 @@ dependencies = [
     # OpenAI SDK — for OpenAI-compatible LLM endpoints
     # (OpenAI, Ollama, vLLM, LM Studio, Groq, …)
     "openai>=1.0.0",
-    # Language detection — used by MetadataEnricher (local, no API)
-    "langdetect>=1.0.9",
-    # Markdown parsing for heading- and structure-aware metadata without regex
-    "markdown>=3.7",
-    "beautifulsoup4>=4.12.3",
+    # Markdown token parser for heading and structure-aware metadata
+    "markdown-it-py>=4.0.0",
     # Deterministic document date extraction from titles / openings
     "dateparser>=1.2.1",
-    # SSE streaming responses (POST /query/stream)
-    "sse-starlette>=2.1.0",
     # ColBERT late-interaction reranker (local HuggingFace, no index change needed)
     "pylate>=1.1.0",
     # MinIO — object storage client for original document files
@@ -52,13 +45,17 @@ dependencies = [
     "nltk>=3.9.1",
 ]
 
+[project.scripts]
+advanced-rag-api = "adapters.api.app:main"
+advanced-rag-mcp = "adapters.mcp.server:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 # Tell hatchling which sub-packages to include (this is an app, not a library)
 [tool.hatch.build.targets.wheel]
-packages = ["components", "pipelines", "routers", "models", "services"]
+packages = ["adapters", "core"]
 
 [dependency-groups]
 dev = [
@@ -74,4 +71,4 @@ select = ["E", "F", "I"]  # pycodestyle + pyflakes + isort
 
 [tool.ruff.lint.per-file-ignores]
 # LLM prompt strings contain intentionally long few-shot examples
-"components/query_analyzer.py" = ["E501"]
+"core/components/query_analyzer.py" = ["E501"]
