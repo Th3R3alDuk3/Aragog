@@ -1,10 +1,43 @@
 <p align="center">
-  <img src="logo.png" alt="Advanced Hybrid RAG logo" width="220">
+  <img src="logo.png" alt="Aragok logo" width="220">
 </p>
 
-# Advanced Hybrid RAG
+# Aragok
 
-Monorepo fuer ein hybrides RAG-System mit API, MCP-Server und Chainlit-UI.
+<p align="center">
+  <a href="https://www.python.org/downloads/">
+    <img alt="Python 3.13" src="https://img.shields.io/badge/python-3.13-3776AB?style=flat-square&logo=python&logoColor=white">
+  </a>
+  <a href="https://fastapi.tiangolo.com/">
+    <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-api-009688?style=flat-square&logo=fastapi&logoColor=white">
+  </a>
+  <a href="https://gofastmcp.com/">
+    <img alt="FastMCP" src="https://img.shields.io/badge/FastMCP-mcp-111827?style=flat-square">
+  </a>
+  <a href="https://haystack.deepset.ai/">
+    <img alt="Haystack 2.x" src="https://img.shields.io/badge/Haystack-2.x-4F46E5?style=flat-square">
+  </a>
+  <a href="https://qdrant.tech/">
+    <img alt="Qdrant" src="https://img.shields.io/badge/Qdrant-vector%20db-EA580C?style=flat-square">
+  </a>
+  <a href="https://chainlit.io/">
+    <img alt="Chainlit" src="https://img.shields.io/badge/Chainlit-frontend-0EA5E9?style=flat-square">
+  </a>
+</p>
+
+<p align="center">
+  <a href="backend/README.md">
+    <img alt="Backend Docs" src="https://img.shields.io/badge/docs-backend-16A34A?style=flat-square">
+  </a>
+  <a href="backend/docs/architecture.md">
+    <img alt="Architecture" src="https://img.shields.io/badge/docs-architecture-7C3AED?style=flat-square">
+  </a>
+  <a href="frontend/README.md">
+    <img alt="Frontend Docs" src="https://img.shields.io/badge/docs-frontend-0284C7?style=flat-square">
+  </a>
+</p>
+
+Aragok ist ein Monorepo fuer ein hybrides RAG-System mit API, MCP-Server und Chainlit-UI.
 
 Der Kern liegt in [`backend/`](backend/README.md):
 - Hybrid Retrieval mit Dense + Sparse + Reranking
