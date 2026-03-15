@@ -16,8 +16,8 @@ backend/
 ```
 
 `RagRuntime` in `core/runtime.py` is the shared assembly root. Both adapters start the
-same runtime and use the same `QueryEngine`, `RetrievalEngine`, `IndexingService`,
-`MinioStore`, `QdrantStores`, and `TaskStore`.
+same runtime assembly and use the same `QueryEngine`, `RetrievalEngine`,
+`IndexingService`, `MinioStore`, and `TaskStore`.
 
 This means:
 - FastAPI and MCP do not proxy requests to each other
@@ -115,8 +115,10 @@ is semantically ambiguous without context.  Which company? Which period?
 > The margin improved to 23 %.
 
 This is done by `ChunkAnalyzer` in a single LLM call per chunk.
-The `context_prefix` is prepended to `doc.content` before embedding.
-The original text is preserved in `meta["original_content"]` for display.
+The analyzer stores both `meta["original_content"]` and
+`meta["context_prefix"]`. A dedicated `DenseContextInjector` prepends the
+prefix only for the dense embedding branch; sparse embeddings keep the
+original chunk text and use metadata for term matching.
 
 **Impact (Anthropic)**: -35% retrieval failure rate.  Largest single improvement.
 
@@ -142,7 +144,7 @@ are written to separate Qdrant collections at indexing time.
 Docling produces well-structured markdown with H1/H2/H3 headings.
 `HierarchicalDocumentSplitter` (Haystack built-in, used inside `ParentChildSplitter`)
 splits documents into word-based chunks, but it does not emit heading metadata.
-`ChunkAnnotator` therefore parses each chunk with a Markdown parser, carries a
+`ChunkAnnotator` therefore parses each chunk with `markdown-it-py`, carries a
 heading stack across consecutive chunks, and derives `section_title` /
 `section_path` from the parsed headings.
 
@@ -200,20 +202,29 @@ and the system continues normally — no request fails due to decomposition erro
 - Produces attention-weighted token activations over the vocabulary
 
 ### What gets embedded
-The `SentenceTransformersDocumentEmbedder` is configured with:
+The dense `SentenceTransformersDocumentEmbedder` is configured with:
 ```python
 meta_fields_to_embed=[
-    "section_title", "title", "document_type",
-    "summary", "keywords", "ent_persons",
+    "section_title", "title", "document_type", "summary", "keywords",
+]
+```
+The sparse embedder uses a broader set of metadata fields:
+```python
+meta_fields_to_embed=[
+    "section_path", "section_title", "title", "document_type",
+    "summary", "keywords", "ent_locations", "ent_dates",
+    "ent_events", "ent_quantities", "ent_persons",
     "ent_organizations", "ent_products", "ent_laws",
 ]
 ```
-`context_prefix` is already prepended to `doc.content` by `ChunkAnalyzer`.
-The effective embedded text is therefore the contextualized chunk text plus the
-listed structural / semantic metadata fields.
+`context_prefix` is injected only in the dense branch by `DenseContextInjector`.
+The effective dense text is therefore `context_prefix + original_content`,
+while sparse embeddings stay closer to the raw chunk text and rely more on the
+metadata terms above.
 
-This means the vector carries both the structural location AND the contextual meaning
-of the chunk — not just its raw text.
+This means dense vectors carry contextualized chunk meaning, while sparse
+vectors keep strong lexical matching for entities, dates, quantities, events,
+and section breadcrumbs.
 
 ---
 
@@ -254,7 +265,7 @@ LLM in those cases.
 | Stage | Latency | Parallelism |
 |-------|---------|-------------|
 | Docling | 2-30s / file (depends on size) | per-file |
-| ChunkAnalyzer (indexing) | ~1s / chunk | `ANALYZER_MAX_WORKERS` threads |
+| ChunkAnalyzer (indexing) | ~1s / chunk | `ANALYZER_MAX_CONCURRENCY` concurrent requests |
 | Dense embed (query) | ~50ms | — |
 | Sparse embed (query) | ~20ms | — |
 | Qdrant retrieval (dense + sparse) | ~5-20ms | parallel |

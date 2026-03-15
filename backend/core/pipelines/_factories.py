@@ -34,8 +34,19 @@ def _onnx_providers(device: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-_EMBED_META_FIELDS = [
+_DENSE_EMBED_META_FIELDS = [
     # structural context
+    "section_title",
+    "title",
+    "document_type",
+    # compact semantic hints
+    "summary",
+    "keywords",
+]
+
+_SPARSE_EMBED_META_FIELDS = [
+    # structural context
+    "section_path",
     "section_title",
     "title",
     "document_type",
@@ -43,6 +54,10 @@ _EMBED_META_FIELDS = [
     "summary",
     "keywords",
     # named entities (flat list[str])
+    "ent_locations",
+    "ent_dates",
+    "ent_events",
+    "ent_quantities",
     "ent_persons",
     "ent_organizations",
     "ent_products",
@@ -50,17 +65,17 @@ _EMBED_META_FIELDS = [
 ]
 
 
-def build_document_embedder(settings: Settings) -> SentenceTransformersDocumentEmbedder:
+def build_dense_document_embedder(settings: Settings) -> SentenceTransformersDocumentEmbedder:
     """
     Dense document embedder for the indexing pipeline.
 
-    ``meta_fields_to_embed`` appends structural and semantic metadata to the
-    embedded text.  ``context_prefix`` is already prepended to document.content
-    by ChunkAnalyzer and therefore not listed here.
+    ``meta_fields_to_embed`` appends a small amount of structural metadata to
+    the embedded text. ``context_prefix`` is injected into the dense-only
+    document content by DenseContextInjector and therefore not listed here.
     """
     return SentenceTransformersDocumentEmbedder(
         model=settings.embedding_model,
-        meta_fields_to_embed=_EMBED_META_FIELDS,
+        meta_fields_to_embed=_DENSE_EMBED_META_FIELDS,
         normalize_embeddings=True,
         device=ComponentDevice.from_str(settings.embedding_device),
     )
@@ -93,7 +108,7 @@ def build_sparse_document_embedder(
     return FastembedSparseDocumentEmbedder(
         model=settings.sparse_embedding_model,
         model_kwargs={"providers": _onnx_providers(settings.sparse_embedding_device)},
-        meta_fields_to_embed=_EMBED_META_FIELDS,
+        meta_fields_to_embed=_SPARSE_EMBED_META_FIELDS,
     )
 
 

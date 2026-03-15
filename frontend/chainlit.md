@@ -1,14 +1,35 @@
-# Welcome to Chainlit! 🚀🤖
+# Advanced Hybrid RAG
 
-Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
+Willkommen im Chainlit-Frontend fuer dieses RAG-System.
 
-## Useful Links 🔗
+Dieses UI ist bewusst duenn:
+- Uploads und Task-Polling laufen ueber die FastAPI unter `http://localhost:8000`
+- Fragen laufen ueber den lokalen MCP-Server aus `../backend/main_mcp.py`
+- Quellen werden direkt aus den indexierten Dokumenten angezeigt
 
-- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
-- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
+## Was du hier machen kannst
 
-We can't wait to see what you create with Chainlit! Happy coding! 💻😊
+- Dokumente hochladen und indexieren
+- Indexing-Schritte verfolgen
+- Fragen an den Dokumentbestand stellen
+- Quellen, Seiten und Originaldokumente pruefen
 
-## Welcome screen
+## Typischer Ablauf
 
-To modify the welcome screen, edit the `chainlit.md` file at the root of your project. If you do not want a welcome screen, just leave this file empty.
+1. Backend-Infrastruktur starten
+2. API starten
+3. Chainlit starten
+4. Optional ein Dokument hochladen
+5. Danach Fragen stellen
+
+## Gute Einstiegsfragen
+
+- Fasse das zuletzt indexierte Dokument knapp zusammen.
+- Welche drei wichtigsten Aussagen stehen im Dokument?
+- Welche Risiken, offenen Punkte oder Konflikte nennt das Dokument?
+
+## Hinweise
+
+- Wenn keine passenden Quellen gefunden werden, zuerst ein Dokument hochladen.
+- Wenn Query-Aufrufe fehlschlagen, pruefen ob `../backend/.venv/bin/python` und `../backend/main_mcp.py` vorhanden sind.
+- Die eigentliche Backend-Doku liegt in `../backend/README.md`.

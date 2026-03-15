@@ -148,10 +148,17 @@ def _apply(doc: Document, analysis: ChunkAnalysis) -> Document:
     meta.ent_events        = e.events
     meta.ent_quantities    = e.quantities
 
-    embedded_content = f"{prefix}\n\n{meta.original_content}" if prefix else meta.original_content
     dumped = meta.model_dump(exclude={"doc_beginning"})
     # Pydantic drops __-prefixed keys (name mangling); restore them from the original meta
     for k, v in doc.meta.items():
         if k.startswith("__"):
             dumped[k] = v
-    return Document(content=embedded_content, meta=dumped, id=doc.id)
+    return Document(
+        id=doc.id,
+        content=meta.original_content,
+        blob=doc.blob,
+        meta=dumped,
+        score=doc.score,
+        embedding=doc.embedding,
+        sparse_embedding=doc.sparse_embedding,
+    )

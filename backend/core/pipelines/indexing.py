@@ -7,12 +7,13 @@ from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from core.components.chunk_analyzer import ChunkAnalyzer
 from core.components.chunk_annotator import ChunkAnnotator
+from core.components.dense_context_injector import DenseContextInjector
 from core.components.docling import Docling
 from core.components.document_analyzer import DocumentAnalyzer
 from core.components.parent_child_splitter import ParentChildSplitter
 from core.config import Settings
 from core.pipelines._factories import (
-    build_document_embedder,
+    build_dense_document_embedder,
     build_sparse_document_embedder,
 )
 
@@ -113,13 +114,16 @@ def build_indexing_pipeline(
             max_workers=settings.analyzer_max_concurrency,
         )
 
-    # Stage 9: dense embedding (children)
-    dense_embedder = build_document_embedder(settings)
-
-    # Stage 10: sparse embedding (children)
+    # Stage 9: sparse embedding (children, original content)
     sparse_embedder = build_sparse_document_embedder(settings)
 
-    # Stage 11: write children
+    # Stage 10: inject context prefix for dense-only content
+    dense_context_injector = DenseContextInjector()
+
+    # Stage 11: dense embedding (children)
+    dense_embedder = build_dense_document_embedder(settings)
+
+    # Stage 12: write children
     children_writer = DocumentWriter(
         document_store=children_store,
         policy=DuplicatePolicy.OVERWRITE,
@@ -143,8 +147,9 @@ def build_indexing_pipeline(
     pipeline.add_component("chunk_analyzer",              chunk_analyzer)
     if raptor:
         pipeline.add_component("raptor",            raptor)
-    pipeline.add_component("dense_embedder",        dense_embedder)
     pipeline.add_component("sparse_embedder",       sparse_embedder)
+    pipeline.add_component("dense_context_injector", dense_context_injector)
+    pipeline.add_component("dense_embedder",        dense_embedder)
     pipeline.add_component("children_writer",       children_writer)
     # parents branch
     pipeline.add_component("parents_writer",        parents_writer)
@@ -157,11 +162,12 @@ def build_indexing_pipeline(
     pipeline.connect("chunk_annotator.documents",               "chunk_analyzer.documents")
     if raptor:
         pipeline.connect("chunk_analyzer.documents",                 "raptor.documents")
-        pipeline.connect("raptor.documents",                   "dense_embedder.documents")
+        pipeline.connect("raptor.documents",                   "sparse_embedder.documents")
     else:
-        pipeline.connect("chunk_analyzer.documents",                 "dense_embedder.documents")
-    pipeline.connect("dense_embedder.documents",               "sparse_embedder.documents")
-    pipeline.connect("sparse_embedder.documents",              "children_writer.documents")
+        pipeline.connect("chunk_analyzer.documents",                 "sparse_embedder.documents")
+    pipeline.connect("sparse_embedder.documents",              "dense_context_injector.documents")
+    pipeline.connect("dense_context_injector.documents",       "dense_embedder.documents")
+    pipeline.connect("dense_embedder.documents",               "children_writer.documents")
     # parents branch (no embedding — stored by ID only)
     pipeline.connect("parent_child_splitter.parents",          "parents_writer.documents")
 

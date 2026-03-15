@@ -3,10 +3,13 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import chainlit as cl
 import httpx
 from chainlit.input_widget import Slider, Switch
+from fastmcp import Client
+from fastmcp.client.transports.stdio import PythonStdioTransport
 
 
 # ---------------------------------------------------------------------------
@@ -17,8 +20,17 @@ from chainlit.input_widget import Slider, Switch
 API_URL = os.getenv("RAG_API_URL", "http://localhost:8000").rstrip("/")
 HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 QUERY_SETTINGS_KEY = "query_settings"
-DEFAULT_QUERY_SETTINGS = {"top_k": 5, "streaming": True, "show_rag_tasklist": False}
+DEFAULT_QUERY_SETTINGS = {"top_k": 5, "show_rag_tasklist": False}
 TASK_LIST_CLOSE_DELAY = 1.5
+FRONTEND_DIR = Path(__file__).resolve().parent
+MCP_SCRIPT = Path(
+    os.getenv("RAG_MCP_SCRIPT", str(FRONTEND_DIR.parent / "backend" / "main_mcp.py"))
+).resolve()
+MCP_PYTHON = Path(
+    os.getenv("RAG_MCP_PYTHON", str(FRONTEND_DIR.parent / "backend" / ".venv" / "bin" / "python"))
+).resolve()
+MCP_CLIENT_KEY = "mcp_client"
+MCP_TIMEOUT = float(os.getenv("RAG_MCP_TIMEOUT", "180"))
 UPLOAD_COMMANDS = {"/upload", "upload", "datei hochladen"}
 STARTERS = [
     ("Kurzfassung", "Fasse das zuletzt indexierte Dokument knapp zusammen."),
@@ -86,6 +98,35 @@ def _error_text(response: httpx.Response) -> str:
     return json.dumps(payload, ensure_ascii=True)
 
 
+def _result_payload(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    data = getattr(result, "data", None)
+    if isinstance(data, dict):
+        return data
+    structured = getattr(result, "structured_content", None)
+    if isinstance(structured, dict):
+        return structured
+    if hasattr(result, "model_dump"):
+        payload = result.model_dump()
+        if isinstance(payload, dict):
+            return payload
+    raise RuntimeError("MCP tool returned an unexpected payload.")
+
+
+def _source_download_url(source: dict[str, Any]) -> str | None:
+    meta = source.get("meta") or {}
+    direct = meta.get("download_url") or meta.get("minio_url")
+    if isinstance(direct, str) and direct:
+        return direct
+
+    minio_key = meta.get("minio_key")
+    if isinstance(minio_key, str) and minio_key:
+        return f"{API_URL}/documents/download/{quote(minio_key, safe='')}"
+
+    return None
+
+
 def _chainlit_task_status(status: str) -> cl.TaskStatus:
     if status == "running":
         return cl.TaskStatus.RUNNING
@@ -119,12 +160,6 @@ async def _chat_settings() -> dict[str, Any]:
                 description="Wie viele Quellen maximal angezeigt werden.",
             ),
             Switch(
-                id="streaming",
-                label="Antwort streamen",
-                initial=True,
-                description="Antwort Token fuer Token anzeigen.",
-            ),
-            Switch(
                 id="show_rag_tasklist",
                 label="RAG-Taskliste",
                 initial=False,
@@ -140,6 +175,40 @@ async def _request_json(method: str, path: str, **kwargs: Any) -> dict[str, Any]
     if response.is_success:
         return response.json()
     raise RuntimeError(_error_text(response))
+
+
+async def _mcp_client() -> Client:
+    client = cl.user_session.get(MCP_CLIENT_KEY)
+    if client is not None and client.is_connected():
+        return client
+
+    if not MCP_SCRIPT.is_file():
+        raise RuntimeError(f"MCP script not found: {MCP_SCRIPT}")
+    if not MCP_PYTHON.is_file():
+        raise RuntimeError(f"MCP Python not found: {MCP_PYTHON}. Run 'cd backend && uv sync'.")
+
+    client = Client(
+        PythonStdioTransport(
+            script_path=MCP_SCRIPT,
+            cwd=str(MCP_SCRIPT.parent),
+            python_cmd=str(MCP_PYTHON),
+            keep_alive=True,
+        ),
+        timeout=MCP_TIMEOUT,
+        init_timeout=MCP_TIMEOUT,
+    )
+    await client.__aenter__()
+    cl.user_session.set(MCP_CLIENT_KEY, client)
+    return client
+
+
+async def _close_mcp_client() -> None:
+    client = cl.user_session.get(MCP_CLIENT_KEY)
+    if client is None:
+        return
+    if client.is_connected():
+        await client.__aexit__(None, None, None)
+    cl.user_session.set(MCP_CLIENT_KEY, None)
 
 
 async def _new_task_list(status: str, titles: list[str]) -> cl.TaskList:
@@ -333,7 +402,7 @@ async def _send_sources(sources: list[dict[str, Any]]) -> None:
         score = source.get("score")
         page_start = meta.get("page_start")
         page_end = meta.get("page_end")
-        download_url = meta.get("download_url") or meta.get("minio_url")
+        download_url = _source_download_url(source)
         excerpt = " ".join((source.get("content") or "").split())
 
         if len(excerpt) > 360:
@@ -424,11 +493,9 @@ async def _run_query(query: str) -> None:
                     done_through=0,
                 )
 
-            if settings.get("streaming", True):
-                result = await _stream_query(payload)
-            else:
-                result = await _request_json("POST", "/query", json=payload)
-                await cl.Message(content=result.get("answer", "")).send()
+            client = await _mcp_client()
+            result = _result_payload(await client.call_tool("rag_query", payload))
+            await cl.Message(content=result.get("answer", "")).send()
 
             step.output = {
                 "is_compound": result.get("is_compound", False),
@@ -491,55 +558,6 @@ async def _run_query(query: str) -> None:
         raise
 
 
-async def _stream_query(payload: dict[str, Any]) -> dict[str, Any]:
-    message = await cl.Message(content="").send()
-    result = {"answer": "", "sources": []}
-    event = "message"
-    data_lines: list[str] = []
-
-    async def flush_event() -> None:
-        nonlocal event, data_lines, result
-        if not data_lines:
-            event = "message"
-            return
-
-        data = "\n".join(data_lines)
-        if event == "token":
-            await message.stream_token(data)
-        elif event == "sources":
-            result["sources"] = json.loads(data)
-        elif event == "error":
-            raise RuntimeError(data)
-
-        event = "message"
-        data_lines = []
-
-    async with httpx.AsyncClient(base_url=API_URL, timeout=None) as client:
-        async with client.stream("POST", "/query/stream", json=payload) as response:
-            if not response.is_success:
-                raw_error = await response.aread()
-                text = raw_error.decode("utf-8", errors="ignore").strip()
-                raise RuntimeError(text or f"HTTP {response.status_code}")
-
-            async for line in response.aiter_lines():
-                if line == "":
-                    await flush_event()
-                    continue
-                if line.startswith(":"):
-                    continue
-                if line.startswith("event:"):
-                    event = line[6:].strip()
-                    continue
-                if line.startswith("data:"):
-                    data_lines.append(line[5:].lstrip())
-
-            await flush_event()
-
-    result["answer"] = message.content
-    await message.update()
-    return result
-
-
 # ---------------------------------------------------------------------------
 # Chainlit hooks
 # ---------------------------------------------------------------------------
@@ -557,9 +575,9 @@ async def on_chat_start() -> None:
 
     await cl.Message(
         content=(
-            "RAG Studio ist verbunden mit "
-            f"`{API_URL}`.\n\n"
-            "Lade zuerst optional ein Dokument hoch oder stelle direkt eine Frage."
+            f"RAG Studio ist mit der API unter `{API_URL}` verbunden.\n\n"
+            "Uploads und Task-Polling laufen ueber HTTP. Queries laufen ueber den "
+            "MCP-Server aus `../backend/main_mcp.py`."
         ),
         actions=[
             cl.Action(
@@ -575,6 +593,11 @@ async def on_chat_start() -> None:
 @cl.on_settings_update
 async def on_settings_update(settings: dict[str, Any]) -> None:
     cl.user_session.set(QUERY_SETTINGS_KEY, settings)
+
+
+@cl.on_chat_end
+async def on_chat_end() -> None:
+    await _close_mcp_client()
 
 
 @cl.action_callback("upload_document")

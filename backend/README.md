@@ -30,17 +30,19 @@ The backend exposes two thin adapters on top of one shared runtime:
 │  ChunkAnnotator  (chunk_index, section_title, section_path)         │
 │      │                                                              │
 │  ChunkAnalyzer  ◄── 1 LLM call / chunk (async, parallelised)        │
-│      │  • context_prefix  (prepended before embedding)              │
+│      │  • context_prefix  (injected into dense-only embedding text) │
 │      │  • summary, keywords, classification                         │
 │      │  • entities: orgs, persons, locations, dates, …              │
 │      │                                                              │
 │  [RAPTOR]  ◄── RAPTOR_ENABLED  (section + doc summaries)  │
 │      │                                                              │
-│  SentenceTransformersDocumentEmbedder  (BAAI/bge-m3, local)         │
-│      │  dense vector (1024 dim)                                     │
-│      │                                                              │
 │  FastembedSparseDocumentEmbedder  (BM42/SPLADE, local ONNX)         │
 │      │  sparse vector                                               │
+│      │                                                              │
+│  DenseContextInjector  (context_prefix + original_content)          │
+│      │                                                              │
+│  SentenceTransformersDocumentEmbedder  (BAAI/bge-m3, local)         │
+│      │  dense vector (1024 dim)                                     │
 │      │                                                              │
 │  QdrantDocumentStore (children) ────────────────────────────────┐  │
 │  QdrantDocumentStore (parents)  ───────────────────────────────┐│  │
@@ -190,12 +192,12 @@ curl -X POST http://localhost:8000/documents/index \
 curl http://localhost:8000/tasks/3fa85f64-...
 # {
 #   "status": "running",
-#   "step": "embedding_dense",
-#   "current_step_index": 9,
+#   "step": "embedding_sparse",
+#   "current_step_index": 10,
 #   "steps": [
 #     {"key": "uploading_minio", "label": "Datei ablegen", "index": 0, "status": "done"},
 #     {"key": "converting", "label": "Dokument konvertieren", "index": 1, "status": "done"},
-#     {"key": "embedding_dense", "label": "Dense Embeddings berechnen", "index": 9, "status": "running"}
+#     {"key": "embedding_sparse", "label": "Sparse Embeddings berechnen", "index": 10, "status": "running"}
 #   ]
 # }
 ```
@@ -321,10 +323,11 @@ backend/
 │   │   ├── meta.py
 │   │   ├── query.py
 │   │   ├── retrieval.py
-│   │   └── tasks.py
+│   │   ├── tasks.py
+│   │   └── vocabulary.py
 │   ├── components/        ← Haystack/OpenAI building blocks
 │   ├── pipelines/         ← indexing, retrieval, generation
-│   ├── services/          ← QueryEngine, RetrievalEngine, IndexingService, Evaluation
+│   ├── services/          ← QueryEngine, RetrievalEngine, IndexingService, EvaluationService
 │   └── storage/           ← MinIO, Qdrant, TaskStore
 ```
 

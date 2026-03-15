@@ -5,6 +5,7 @@ description = "Chainlit frontend for the Advanced Hybrid RAG backend"
 requires-python = ">=3.13"
 dependencies = [
     "chainlit>=2.9.6,<3",
+    "fastmcp>=3.1.1",
     "httpx>=0.27.0,<1",
 ]
 

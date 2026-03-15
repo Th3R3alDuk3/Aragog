@@ -31,8 +31,8 @@ INDEXING_STEP_LABELS = [
     ("enriching_chunks", "Chunk-Kontext anreichern"),
     ("analyzing_content", "Chunk-Inhalte analysieren"),
     ("summarizing_raptor", "Hierarchische Zusammenfassungen erzeugen"),
-    ("embedding_dense", "Dense Embeddings berechnen"),
     ("embedding_sparse", "Sparse Embeddings berechnen"),
+    ("embedding_dense", "Dense Embeddings berechnen"),
     ("writing", "Child-Chunks schreiben"),
 ]
 
@@ -267,10 +267,18 @@ class IndexingService:
                 except ValueError:
                     pass
 
-                docs = (await self._run_component(task, "embedding_dense", "dense_embedder", documents=docs))[
+                docs = (await self._run_component(task, "embedding_sparse", "sparse_embedder", documents=docs))[
                     "documents"
                 ]
-                docs = (await self._run_component(task, "embedding_sparse", "sparse_embedder", documents=docs))[
+                docs = (
+                    await self._run_component(
+                        task,
+                        "embedding_dense",
+                        "dense_context_injector",
+                        documents=docs,
+                    )
+                )["documents"]
+                docs = (await self._run_component(task, "embedding_dense", "dense_embedder", documents=docs))[
                     "documents"
                 ]
                 written = (
