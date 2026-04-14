@@ -1,6 +1,6 @@
 # Backend Code Style
 
-`backend/adapters/api/app.py`, `backend/core/runtime.py` und `backend/core/config.py` sind die stilistischen Referenzen fuer neuen Backend-Code.
+`app.py`, `core/runtime.py` und `core/config.py` sind die stilistischen Referenzen fuer neuen Code.
 
 Der Standard ist bewusst schlicht:
 
@@ -15,11 +15,11 @@ Der Standard ist bewusst schlicht:
 - Bevorzuge einfache, lineare Kontrollfluesse statt cleverer Abstraktionen.
 - Halte Module kompakt und funktional gut scanbar.
 - Extrahiere nur dann Hilfsfunktionen oder neue Dateien, wenn Wiederverwendung oder Verstaendlichkeit dadurch real besser wird.
-- Nutze klare, absolute Imports wie in `backend/adapters/api/app.py` und `backend/core/runtime.py`.
+- Nutze klare, absolute Imports wie in `app.py` und `core/runtime.py`.
 - Benenne Dinge direkt und technisch praezise.
 - Halte Konfiguration, Verdrahtung und abgeleitete Properties sichtbar und nah beieinander.
 
-## Struktur im Stil von `backend/adapters/api/app.py` und `backend/core/runtime.py`
+## Struktur im Stil von `app.py` und `core/runtime.py`
 
 - Imports stehen gesammelt und sauber gruppiert am Anfang.
 - Groebere Abschnitte werden mit einfachen Trenner-Kommentaren markiert.
@@ -27,7 +27,7 @@ Der Standard ist bewusst schlicht:
 - Konstruktion und Verdrahtung von Komponenten bleiben explizit statt indirekt.
 - Kurze erklaerende Kommentare sind gut, wenn sie Kontext geben. Kommentarflut ist nicht gewuenscht.
 
-## Struktur im Stil von `backend/core/config.py`
+## Struktur im Stil von `core/config.py`
 
 - Klassen mit vielen Feldern werden fachlich in klare Abschnitte gruppiert.
 - Defaults stehen direkt am Feld und nicht in versteckten Fabriken oder Mapping-Tabellen.

@@ -24,8 +24,22 @@ class QueryEngine:
         self.generation_pipeline = generation_pipeline
         self.retrieval_engine = retrieval_engine
 
-    async def query(self, request: QueryInput) -> QueryResult:
-        ctx = await self.retrieval_engine.prepare(request)
+    async def query(
+        self,
+        request: QueryInput,
+        *,
+        use_hyde: bool | None = None,
+        use_crag: bool | None = None,
+        crag_threshold: float | None = None,
+        crag_max_retries: int | None = None,
+    ) -> QueryResult:
+        ctx = await self.retrieval_engine.prepare(
+            request,
+            use_hyde=use_hyde,
+            use_crag=use_crag,
+            crag_threshold=crag_threshold,
+            crag_max_retries=crag_max_retries,
+        )
         if not ctx.merged_docs:
             raise NoDocumentsFoundError("No relevant documents found for your query.")
 

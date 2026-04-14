@@ -51,7 +51,23 @@ class RetrievalEngine:
         self.retrieval_pipeline = retrieval_pipeline
         self.analyzer = analyzer
 
-    async def prepare(self, request: QueryInput | RetrievalInput) -> RetrievalContext:
+    async def prepare(
+        self,
+        request: QueryInput | RetrievalInput,
+        *,
+        use_hyde: bool | None = None,
+        use_crag: bool | None = None,
+        crag_threshold: float | None = None,
+        crag_max_retries: int | None = None,
+    ) -> RetrievalContext:
+        # Resolve overrides against settings defaults
+        _use_hyde = use_hyde if use_hyde is not None else (
+            "hyde_generator" in self.retrieval_pipeline.graph.nodes
+        )
+        _use_crag = use_crag if use_crag is not None else self.settings.crag_enabled
+        _crag_threshold = crag_threshold if crag_threshold is not None else self.settings.crag_score_threshold
+        _crag_max_retries = crag_max_retries if crag_max_retries is not None else self.settings.crag_max_retries
+
         analysis = await self.analyzer.analyze(request.query)
         sub_questions = analysis.sub_questions
         is_compound = analysis.is_compound
@@ -63,8 +79,12 @@ class RetrievalEngine:
         )
 
         filters = build_filters(request, analysis)
-        has_hyde = "hyde_generator" in self.retrieval_pipeline.graph.nodes
-        logger.info("Filters  → %s | HyDE=%s", filters or "none", has_hyde)
+        logger.info(
+            "Filters  → %s | HyDE=%s | CRAG=%s",
+            filters or "none",
+            _use_hyde,
+            _use_crag,
+        )
 
         sub_question_results: list[list[Any]] = []
         source_results: list[list[Any]] = []
@@ -76,15 +96,18 @@ class RetrievalEngine:
                 i + 1,
                 len(sub_questions),
                 sub_q,
-                " (CRAG)" if self.settings.crag_enabled else "",
+                " (CRAG)" if _use_crag else "",
             )
             try:
-                if self.settings.crag_enabled:
+                if _use_crag:
                     docs, source_docs, low = await retrieve_with_crag(
                         self.retrieval_pipeline,
                         sub_q,
                         filters,
                         self.settings,
+                        use_hyde=_use_hyde,
+                        crag_threshold=_crag_threshold,
+                        crag_max_retries=_crag_max_retries,
                     )
                     low_confidence = low_confidence or low
                 else:
@@ -92,6 +115,7 @@ class RetrievalEngine:
                         self.retrieval_pipeline,
                         sub_q,
                         filters,
+                        use_hyde=_use_hyde,
                     )
             except Exception as exc:
                 raise RetrievalError(f"Retrieval failed for '{sub_q}'.") from exc
@@ -119,8 +143,22 @@ class RetrievalEngine:
             analysis=analysis,
         )
 
-    async def retrieve(self, request: RetrievalInput) -> RetrievalResult:
-        ctx = await self.prepare(request)
+    async def retrieve(
+        self,
+        request: RetrievalInput,
+        *,
+        use_hyde: bool | None = None,
+        use_crag: bool | None = None,
+        crag_threshold: float | None = None,
+        crag_max_retries: int | None = None,
+    ) -> RetrievalResult:
+        ctx = await self.prepare(
+            request,
+            use_hyde=use_hyde,
+            use_crag=use_crag,
+            crag_threshold=crag_threshold,
+            crag_max_retries=crag_max_retries,
+        )
         sources = self.format_source_docs(ctx.source_docs[: request.top_k])
         if not sources:
             raise NoDocumentsFoundError("No relevant documents found for your query.")
@@ -297,36 +335,52 @@ async def retrieve_with_crag(
     filters: dict | None,
     settings: Settings,
     attempt: int = 0,
+    *,
+    use_hyde: bool = True,
+    crag_threshold: float | None = None,
+    crag_max_retries: int | None = None,
 ) -> tuple[list, list, bool]:
-    docs, source_docs = await run_retrieval(pipeline, sub_q, filters)
+    _threshold = crag_threshold if crag_threshold is not None else settings.crag_score_threshold
+    _max_retries = crag_max_retries if crag_max_retries is not None else settings.crag_max_retries
+
+    docs, source_docs = await run_retrieval(pipeline, sub_q, filters, use_hyde=use_hyde)
     top_score = (getattr(docs[0], "score", None) or 0.0) if docs else 0.0
-    sufficient = top_score >= settings.crag_score_threshold
-    if sufficient or attempt >= settings.crag_max_retries:
+    sufficient = top_score >= _threshold
+    if sufficient or attempt >= _max_retries:
         if not sufficient:
             logger.info(
                 "CRAG: low confidence (score=%.3f, threshold=%.3f, attempts=%d)",
                 top_score,
-                settings.crag_score_threshold,
+                _threshold,
                 attempt + 1,
             )
         return docs, source_docs, not sufficient
 
     reformulated = await _reformulate_query(sub_q, settings)
-    return await retrieve_with_crag(pipeline, reformulated, filters, settings, attempt + 1)
+    return await retrieve_with_crag(
+        pipeline, reformulated, filters, settings, attempt + 1,
+        use_hyde=use_hyde, crag_threshold=_threshold, crag_max_retries=_max_retries,
+    )
 
 
-async def run_retrieval(pipeline, sub_q: str, filters: dict | None) -> tuple[list, list]:
+async def run_retrieval(
+    pipeline,
+    sub_q: str,
+    filters: dict | None,
+    *,
+    use_hyde: bool = True,
+) -> tuple[list, list]:
     run_input: dict = {
         "dense_embedder": {"text": sub_q},
         "sparse_embedder": {"text": sub_q},
         "reranker": {"query": sub_q},
     }
-    if "hyde_generator" in pipeline.graph.nodes:
+    if use_hyde and "hyde_generator" in pipeline.graph.nodes:
         run_input["hyde_generator"] = {"query": sub_q}
     if filters:
         run_input["dense_retriever"] = {"filters": filters}
         run_input["sparse_retriever"] = {"filters": filters}
-        if "dense_retriever_hyde" in pipeline.graph.nodes:
+        if use_hyde and "dense_retriever_hyde" in pipeline.graph.nodes:
             run_input["dense_retriever_hyde"] = {"filters": filters}
     if "colbert_reranker" in pipeline.graph.nodes:
         run_input["colbert_reranker"] = {"query": sub_q}

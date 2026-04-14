@@ -52,21 +52,23 @@ class IndexingService:
         self.task_store = task_store
         self.semaphore = semaphore
         self._commands: dict[str, IndexCommand] = {}
+        self._run_options: dict[str, dict] = {}
 
-    def enqueue(self, command: IndexCommand) -> TaskInfo:
+    def enqueue(self, command: IndexCommand, *, use_raptor: bool = True) -> TaskInfo:
         now = datetime.now(timezone.utc)
         task = TaskState(
             task_id=str(uuid4()),
             status="pending",
             step="pending",
             current_step_index=-1,
-            steps=self.build_steps(),
+            steps=self.build_steps(use_raptor=use_raptor),
             source=command.file_name,
             created_at=now,
             updated_at=now,
         )
         self.task_store[task.task_id] = task
         self._commands[task.task_id] = command
+        self._run_options[task.task_id] = {"use_raptor": use_raptor}
         return TaskInfo(task_id=task.task_id, source=command.file_name)
 
     async def run(self, task_id: str) -> None:
@@ -75,14 +77,15 @@ class IndexingService:
         if task is None or command is None:
             raise KeyError(f"Task '{task_id}' not found.")
 
+        options = self._run_options.pop(task_id, {})
         try:
             async with self.semaphore:
-                await self._index(task, command)
+                await self._index(task, command, use_raptor=options.get("use_raptor", True))
         finally:
             self._commands.pop(task_id, None)
 
-    def build_steps(self) -> list[TaskStep]:
-        include_raptor = self._has_component("raptor")
+    def build_steps(self, *, use_raptor: bool = True) -> list[TaskStep]:
+        include_raptor = use_raptor and self._has_component("raptor")
         steps: list[TaskStep] = []
 
         for key, label in INDEXING_STEP_LABELS:
@@ -196,7 +199,7 @@ class IndexingService:
             for key, value in extra_meta.items():
                 doc.meta[key] = value
 
-    async def _index(self, task: TaskState, command: IndexCommand) -> None:
+    async def _index(self, task: TaskState, command: IndexCommand, *, use_raptor: bool = True) -> None:
         try:
             task.status = "running"
             indexed_at = datetime.now(timezone.utc)
@@ -260,12 +263,13 @@ class IndexingService:
                     "documents"
                 ]
 
-                try:
-                    docs = (await self._run_component(task, "summarizing_raptor", "raptor", documents=docs))[
-                        "documents"
-                    ]
-                except ValueError:
-                    pass
+                if use_raptor:
+                    try:
+                        docs = (await self._run_component(task, "summarizing_raptor", "raptor", documents=docs))[
+                            "documents"
+                        ]
+                    except ValueError:
+                        pass
 
                 docs = (await self._run_component(task, "embedding_sparse", "sparse_embedder", documents=docs))[
                     "documents"

@@ -1,16 +1,11 @@
 [project]
 name = "advanced-rag"
 version = "0.1.0"
-description = "Advanced Hybrid RAG backend with shared core runtime for API and MCP"
+description = "Advanced Hybrid RAG – Gradio app with built-in MCP server"
 requires-python = ">=3.13"
 dependencies = [
-    # Core framework
-    "fastapi>=0.115.0",
-    "fastapi-offline>=1.7.0",
-    "uvicorn[standard]>=0.32.0",
-    "python-multipart>=0.0.12",
-    # FastMCP server for exposing the query capability to MCP clients
-    "fastmcp>=3.0.0",
+    # Gradio UI + built-in MCP server (pip install gradio[mcp])
+    "gradio[mcp]>=5.0.0",
     # Haystack 2.x  —  2.25.1 is the current stable release (Feb 2026)
     # SentenceTransformersSimilarityRanker (replaces deprecated TransformersSimilarityRanker)
     # was introduced in 2.9.  HierarchicalDocumentSplitter available since 2.7.
@@ -46,8 +41,7 @@ dependencies = [
 ]
 
 [project.scripts]
-advanced-rag-api = "adapters.api.app:main"
-advanced-rag-mcp = "adapters.mcp.server:main"
+advanced-rag = "app:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -55,11 +49,10 @@ build-backend = "hatchling.build"
 
 # Tell hatchling which sub-packages to include (this is an app, not a library)
 [tool.hatch.build.targets.wheel]
-packages = ["adapters", "core"]
+packages = ["core"]
 
 [dependency-groups]
 dev = [
-    "httpx",   # for FastAPI TestClient
     "ruff",
 ]
 
