@@ -70,8 +70,9 @@ def build_dense_document_embedder(settings: Settings) -> SentenceTransformersDoc
     Dense document embedder for the indexing pipeline.
 
     ``meta_fields_to_embed`` appends a small amount of structural metadata to
-    the embedded text. ``context_prefix`` is injected into the dense-only
-    document content by DenseContextInjector and therefore not listed here.
+    the embedded text. ``context_prefix`` is injected into the document content
+    by ``ContextInjector`` (runs before both sparse and dense embedders) and
+    is therefore not listed here.
     """
     return SentenceTransformersDocumentEmbedder(
         model=settings.embedding_model,

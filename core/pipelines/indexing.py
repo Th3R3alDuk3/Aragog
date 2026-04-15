@@ -7,7 +7,7 @@ from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from core.components.chunk_analyzer import ChunkAnalyzer
 from core.components.chunk_annotator import ChunkAnnotator
-from core.components.dense_context_injector import DenseContextInjector
+from core.components.context_injector import ContextInjector
 from core.components.docling import Docling
 from core.components.document_analyzer import DocumentAnalyzer
 from core.components.parent_child_splitter import ParentChildSplitter
@@ -93,6 +93,7 @@ def build_indexing_pipeline(
     chunk_annotator = ChunkAnnotator()
 
     # Stage 6: contextual prefix + semantic metadata (one LLM call/chunk)
+    # Full document passed as context — Anthropic Contextual Retrieval approach.
     chunk_analyzer = ChunkAnalyzer(
         openai_api_key=settings.openai_api_key,
         llm_model=settings.effective_instruct_model,
@@ -100,7 +101,9 @@ def build_indexing_pipeline(
         taxonomy=settings.classification_taxonomy,
         max_concurrency=settings.analyzer_max_concurrency,
         max_chars=settings.analyzer_max_chars,
-        doc_beginning_chars=settings.doc_beginning_chars,
+        max_doc_chars=settings.contextual_doc_max_chars,
+        anthropic_caching_enabled=settings.anthropic_caching_enabled,
+        anthropic_api_key=settings.anthropic_api_key,
     )
 
     # Stage 8 (optional): RAPTOR multi-level summaries
@@ -114,13 +117,15 @@ def build_indexing_pipeline(
             max_workers=settings.analyzer_max_concurrency,
         )
 
-    # Stage 9: sparse embedding (children, original content)
+    # Stage 9: inject context prefix — applied BEFORE both embedders so that
+    # both sparse and dense vectors encode the contextually enriched text
+    # (Anthropic Contextual Retrieval paper recommendation).
+    context_injector = ContextInjector()
+
+    # Stage 10: sparse embedding (context-prefixed content)
     sparse_embedder = build_sparse_document_embedder(settings)
 
-    # Stage 10: inject context prefix for dense-only content
-    dense_context_injector = DenseContextInjector()
-
-    # Stage 11: dense embedding (children)
+    # Stage 11: dense embedding (same context-prefixed content)
     dense_embedder = build_dense_document_embedder(settings)
 
     # Stage 12: write children
@@ -139,34 +144,35 @@ def build_indexing_pipeline(
 
     pipeline = AsyncPipeline()
     pipeline.add_component("converter",             converter)
-    pipeline.add_component("document_analyzer",         document_analyzer)
+    pipeline.add_component("document_analyzer",     document_analyzer)
     pipeline.add_component("cleaner",               cleaner)
     pipeline.add_component("parent_child_splitter", parent_child_splitter)
     # children branch
     pipeline.add_component("chunk_annotator",        chunk_annotator)
-    pipeline.add_component("chunk_analyzer",              chunk_analyzer)
+    pipeline.add_component("chunk_analyzer",         chunk_analyzer)
     if raptor:
-        pipeline.add_component("raptor",            raptor)
-    pipeline.add_component("sparse_embedder",       sparse_embedder)
-    pipeline.add_component("dense_context_injector", dense_context_injector)
-    pipeline.add_component("dense_embedder",        dense_embedder)
-    pipeline.add_component("children_writer",       children_writer)
+        pipeline.add_component("raptor",             raptor)
+    pipeline.add_component("context_injector",       context_injector)
+    pipeline.add_component("sparse_embedder",        sparse_embedder)
+    pipeline.add_component("dense_embedder",         dense_embedder)
+    pipeline.add_component("children_writer",        children_writer)
     # parents branch
-    pipeline.add_component("parents_writer",        parents_writer)
+    pipeline.add_component("parents_writer",         parents_writer)
 
     pipeline.connect("converter.documents",                    "document_analyzer.documents")
-    pipeline.connect("document_analyzer.documents",                "cleaner.documents")
+    pipeline.connect("document_analyzer.documents",            "cleaner.documents")
     pipeline.connect("cleaner.documents",                      "parent_child_splitter.documents")
     # children branch
     pipeline.connect("parent_child_splitter.children",         "chunk_annotator.documents")
-    pipeline.connect("chunk_annotator.documents",               "chunk_analyzer.documents")
+    pipeline.connect("chunk_annotator.documents",              "chunk_analyzer.documents")
     if raptor:
-        pipeline.connect("chunk_analyzer.documents",                 "raptor.documents")
-        pipeline.connect("raptor.documents",                   "sparse_embedder.documents")
+        pipeline.connect("chunk_analyzer.documents",           "raptor.documents")
+        pipeline.connect("raptor.documents",                   "context_injector.documents")
     else:
-        pipeline.connect("chunk_analyzer.documents",                 "sparse_embedder.documents")
-    pipeline.connect("sparse_embedder.documents",              "dense_context_injector.documents")
-    pipeline.connect("dense_context_injector.documents",       "dense_embedder.documents")
+        pipeline.connect("chunk_analyzer.documents",           "context_injector.documents")
+    # Context is now injected before BOTH embedders (Anthropic paper: apply to dense + sparse)
+    pipeline.connect("context_injector.documents",             "sparse_embedder.documents")
+    pipeline.connect("sparse_embedder.documents",              "dense_embedder.documents")
     pipeline.connect("dense_embedder.documents",               "children_writer.documents")
     # parents branch (no embedding — stored by ID only)
     pipeline.connect("parent_child_splitter.parents",          "parents_writer.documents")

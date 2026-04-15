@@ -98,6 +98,7 @@ def _annotate_pages(split_docs: list[Document], source_content: str) -> list[Doc
 
     for doc in sorted(split_docs, key=lambda item: int(item.meta.get("__level") or 0)):
         meta = dict(doc.meta)
+        level = meta.get("__level")
         parent_id = meta.get("__parent_id")
         relative_start = int(meta.get("split_idx_start") or 0)
 
@@ -117,6 +118,10 @@ def _annotate_pages(split_docs: list[Document], source_content: str) -> list[Doc
 
         if "doc_beginning" in meta:
             meta["doc_beginning"] = _strip_page_breaks(str(meta["doc_beginning"]))
+        # doc_content is only needed by ChunkAnalyzer (children branch).
+        # Strip it from parent/root docs so it is not stored in Qdrant.
+        if level in (0, 1):
+            meta.pop("doc_content", None)
 
         annotated.append(
             Document(

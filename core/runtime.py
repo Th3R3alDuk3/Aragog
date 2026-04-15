@@ -33,6 +33,11 @@ class RagRuntime:
     async def startup(self) -> None:
         indexing_pipeline, children_store, parents_store = build_indexing_pipeline(self.settings)
         retrieval_pipeline = build_retrieval_pipeline(self.settings, children_store, parents_store)
+        retrieval_pipeline_hyde = (
+            build_retrieval_pipeline(self.settings, children_store, parents_store, with_hyde=True)
+            if self.settings.hyde_enabled
+            else retrieval_pipeline
+        )
         generation_pipeline = build_generation_pipeline(self.settings)
 
         logger.info(
@@ -69,6 +74,7 @@ class RagRuntime:
         self.retrieval_engine = RetrievalEngine(
             settings=self.settings,
             retrieval_pipeline=retrieval_pipeline,
+            retrieval_pipeline_hyde=retrieval_pipeline_hyde,
             analyzer=query_analyzer,
         )
         self.query_engine = QueryEngine(

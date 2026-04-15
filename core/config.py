@@ -54,7 +54,14 @@ class Settings(BaseSettings):
     child_chunk_size: int = 200
     child_chunk_overlap: int = 20
     doc_beginning_chars: int = 1500
-    raptor_enabled: bool = True
+    # Anthropic Contextual Retrieval: full document passed as context per chunk.
+    # 0 = no truncation (full document). Set e.g. 32000 to cap very large docs.
+    contextual_doc_max_chars: int = 0
+    # Use Anthropic SDK with cache_control on document content (requires
+    # ANTHROPIC_API_KEY and the anthropic package; llm_model must be a claude-* model).
+    anthropic_caching_enabled: bool = False
+    anthropic_api_key: str = ""
+    raptor_enabled: bool = False
 
     dense_retriever_top_k: int = 30
     sparse_retriever_top_k: int = 30

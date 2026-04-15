@@ -45,7 +45,7 @@ Two collections: **children** (retrieval) and **parents** (LLM context).
 ## 2. Hybrid Search with Reciprocal Rank Fusion
 
 ```
-Query → [Dense retriever: top-30] + [Sparse retriever: top-30] + [HyDE dense: top-30]
+Query → [Dense retriever: top-30] + [Sparse retriever: top-30] + [HyDE dense: top-30]*
                                     ↓
                               RRF fusion
                          score(d) = Σ 1 / (k + rank_i(d))
@@ -55,6 +55,8 @@ Query → [Dense retriever: top-30] + [Sparse retriever: top-30] + [HyDE dense: 
                   [ColBERT pre-filter: top-20]  ← COLBERT_ENABLED
                                     ↓
                          Cross-encoder reranker (top-5)
+
+* HyDE branch only active when use_hyde=True at query time.
 ```
 
 Dense and sparse scores are not directly comparable.  RRF uses only the *rank* —
@@ -63,9 +65,15 @@ no normalisation needed, robust across different collections.
 The cross-encoder reranker reads (query, document) jointly and produces an accurate
 relevance score.  Applied only to the top-20 ColBERT candidates, so latency stays low.
 
+**HyDE implementation note**: `RagRuntime` builds two retrieval pipeline instances at
+startup — one plain (dense + sparse) and one with HyDE components wired in.
+`RetrievalEngine._pipeline_for(use_hyde)` selects the correct variant per request.
+This is required because Haystack validates all mandatory component inputs at runtime;
+a single pipeline containing `hyde_generator` would fail when `use_hyde=False`.
+
 ---
 
-## 3. Contextual Retrieval — Anthropic Option A
+## 3. Contextual Retrieval — Anthropic Paper (full implementation)
 
 Source: [Anthropic blog, October 2024](https://www.anthropic.com/news/contextual-retrieval)
 
@@ -78,10 +86,22 @@ Before embedding each chunk, a 1-2 sentence context is prepended:
 > The margin improved to 23 %.
 
 `ChunkAnalyzer` stores `meta["original_content"]` and `meta["context_prefix"]`.
-`DenseContextInjector` prepends the prefix only for the dense embedding branch;
-sparse embeddings keep the original chunk text.
+`ContextInjector` prepends the prefix **before both the sparse and dense embedders**,
+so both BM42 and the dense embedding encode the contextually enriched text.
+This matches the Anthropic paper recommendation ("add context to the BM25 index too").
 
-**Impact (Anthropic)**: -35% retrieval failure rate.
+**Input to ChunkAnalyzer**: the **full document** is passed as a `<document>` XML block
+(not just the first N characters).  `DocumentAnalyzer` stores the complete text in the
+ephemeral `meta["doc_content"]` field; `ParentChildSplitter` strips it from parent docs
+before they reach Qdrant; `ChunkAnalyzer._apply()` strips it from children.
+
+**Optional Anthropic prompt caching** (`ANTHROPIC_CACHING_ENABLED=true`): uses the
+`anthropic` SDK with `cache_control: ephemeral` on the document block.  Chunks are
+grouped by `doc_id` so the 5-min KV-cache TTL is maximally reused — cuts token cost
+by ~50× on large documents.  Requires `ANTHROPIC_API_KEY` and a `claude-*` model.
+
+**Impact (Anthropic)**: -35% retrieval failure rate (context prefix alone),
+-49% with contextual prefix + BM25.
 
 ### 3b. Parent-Child Chunking
 
@@ -161,9 +181,10 @@ meta_fields_to_embed=[
 ]
 ```
 
-`context_prefix` is injected only in the dense branch by `DenseContextInjector`.
-Dense vectors carry contextualized chunk meaning; sparse vectors keep strong
-lexical matching for entities, dates, quantities, and section breadcrumbs.
+`context_prefix` is injected by `ContextInjector` **before both embedders**.
+Both dense and sparse vectors encode the contextually enriched text.
+Lexical precision for entities, dates, and quantities is preserved because
+these terms appear in both the original content and the prepended context.
 
 ---
 
@@ -176,20 +197,34 @@ One structured JSON call on the full document text:
 Output: doc_id, title, word_count, document_type, document_date/period, language, audience
 ```
 
-### ChunkAnalyzer: one call per chunk
+### ChunkAnalyzer: one call per chunk (+ RAPTOR chunks)
 
 One structured JSON call:
 ```
-Input:  document title + beginning + section path + chunk text
+Input:  full document text (XML-tagged) + section path + chunk text
 Output: context_prefix, summary, keywords, classification, entities (8 types)
 ```
 
 Calls are parallelised up to `ANALYZER_MAX_CONCURRENCY` concurrent requests.
 
+When `RAPTOR_ENABLED=true`, `ChunkAnalyzer` runs a **second pass** on the
+RAPTOR-generated summary chunks after `RAPTOR` completes.  RAPTOR inherits
+`doc_content` and `doc_beginning` from the source chunks via `_base_meta()` so
+the LLM still has full document context for the second pass.
+
+### RAPTOR: two LLM calls per document (when enabled)
+
+```
+Input:  per-section chunk summaries → one section-level summary (LLM call)
+        all section summaries       → one document-level summary (LLM call)
+Output: hier_summary_section + hier_summary_doc chunks, stored as children (level=2)
+```
+
 **Cost estimate (gpt-4o-mini)**:
-- ~480 input tokens + ~180 output tokens per chunk ≈ $0.00013
-- 1000-chunk document ≈ $0.13
-- Use a local model (Ollama) to reduce cost to zero.
+- Input tokens scale with document size (full doc passed each call).
+  For a 10 000-token document: ~10 500 input + ~180 output per chunk ≈ $0.0016
+- 1000-chunk document ≈ $1.60 (OpenAI) or $0 (Ollama/local).
+- With `ANTHROPIC_CACHING_ENABLED`: document tokens cached → costs drop ~50×.
 
 ### QueryAnalyzer: one call per complex query (if needed)
 
@@ -226,7 +261,7 @@ The reranker is the main query latency bottleneck.
 | Cross-encoder reranking | ✅ | BAAI/bge-reranker-v2-m3, local, applied to top-K RRF candidates |
 | ColBERT pre-filter (before cross-encoder) | ✅ | colbert-ir/colbertv2.0 via pylate, optional (`COLBERT_ENABLED`) |
 | HyDE (Hypothetical Document Embeddings) | ✅ | Second dense branch in retrieval pipeline, toggleable per request |
-| RAPTOR-inspired summaries | ✅ | Section + doc-level summary chunks, no clustering tree, toggleable per upload |
+| RAPTOR-inspired summaries | ✅ | **Enabled by default** (`RAPTOR_ENABLED=true` in `.env`); section + doc-level summary chunks enriched by ChunkAnalyzer; no clustering tree |
 | CRAG (Corrective RAG) | ✅ | Score-threshold retry loop + LLM query reformulation, toggleable per request |
 | RAGAS evaluation | ✅ | Faithfulness, answer_relevancy, context_precision (`RAGAS_ENABLED`) |
 | MinIO object storage | ✅ | Stores original files; `minio_key` stored in chunk metadata |

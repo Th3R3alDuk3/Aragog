@@ -26,6 +26,9 @@ dependencies = [
     # OpenAI SDK — for OpenAI-compatible LLM endpoints
     # (OpenAI, Ollama, vLLM, LM Studio, Groq, …)
     "openai>=1.0.0",
+    # Anthropic SDK — optional, used only when ANTHROPIC_CACHING_ENABLED=true
+    # for prompt-cached contextual chunking (Contextual Retrieval paper).
+    "anthropic>=0.40.0",
     # Markdown token parser for heading and structure-aware metadata
     "markdown-it-py>=4.0.0",
     # Deterministic document date extraction from titles / openings

@@ -31,6 +31,7 @@ INDEXING_STEP_LABELS = [
     ("enriching_chunks", "Chunk-Kontext anreichern"),
     ("analyzing_content", "Chunk-Inhalte analysieren"),
     ("summarizing_raptor", "Hierarchische Zusammenfassungen erzeugen"),
+    ("injecting_context", "Kontext-Präfix injizieren"),
     ("embedding_sparse", "Sparse Embeddings berechnen"),
     ("embedding_dense", "Dense Embeddings berechnen"),
     ("writing", "Child-Chunks schreiben"),
@@ -265,23 +266,28 @@ class IndexingService:
 
                 if use_raptor:
                     try:
-                        docs = (await self._run_component(task, "summarizing_raptor", "raptor", documents=docs))[
-                            "documents"
-                        ]
+                        pre_raptor_ids = {d.id for d in docs}
+                        docs = (
+                            await self._run_component(task, "summarizing_raptor", "raptor", documents=docs)
+                        )["documents"]
+                        # ChunkAnalyzer ran before RAPTOR — apply it to the newly
+                        # generated summary chunks so they get context_prefix,
+                        # summary, keywords, classification and NER too.
+                        raptor_new = [d for d in docs if d.id not in pre_raptor_ids]
+                        if raptor_new:
+                            analyzer = self.pipeline.get_component("chunk_analyzer")
+                            analyzed = await analyzer.run(documents=raptor_new)
+                            originals = [d for d in docs if d.id in pre_raptor_ids]
+                            docs = originals + analyzed["documents"]
                     except ValueError:
                         pass
 
+                docs = (
+                    await self._run_component(task, "injecting_context", "context_injector", documents=docs)
+                )["documents"]
                 docs = (await self._run_component(task, "embedding_sparse", "sparse_embedder", documents=docs))[
                     "documents"
                 ]
-                docs = (
-                    await self._run_component(
-                        task,
-                        "embedding_dense",
-                        "dense_context_injector",
-                        documents=docs,
-                    )
-                )["documents"]
                 docs = (await self._run_component(task, "embedding_dense", "dense_embedder", documents=docs))[
                     "documents"
                 ]

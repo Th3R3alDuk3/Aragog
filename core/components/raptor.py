@@ -227,5 +227,7 @@ def _base_meta(source_meta: dict) -> dict:
         "doc_id", "title", "source", "language",
         "indexed_at", "indexed_at_ts",
         "embedding_model", "embedding_provider", "embedding_dimension",
+        # Ephemeral fields needed by ChunkAnalyzer (stripped before Qdrant write)
+        "doc_content", "doc_beginning",
     }
     return {k: v for k, v in source_meta.items() if k in keep}

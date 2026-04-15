@@ -46,10 +46,18 @@ class RetrievalEngine:
         settings: Settings,
         retrieval_pipeline,
         analyzer: QueryAnalyzer,
+        retrieval_pipeline_hyde=None,
     ) -> None:
         self.settings = settings
         self.retrieval_pipeline = retrieval_pipeline
+        # Separate pipeline variant that includes HyDE components. Falls back to
+        # the plain pipeline when HyDE is disabled globally.
+        self.retrieval_pipeline_hyde = retrieval_pipeline_hyde or retrieval_pipeline
         self.analyzer = analyzer
+
+    def _pipeline_for(self, use_hyde: bool):
+        """Return the correct pipeline variant based on the HyDE flag."""
+        return self.retrieval_pipeline_hyde if use_hyde else self.retrieval_pipeline
 
     async def prepare(
         self,
@@ -61,9 +69,7 @@ class RetrievalEngine:
         crag_max_retries: int | None = None,
     ) -> RetrievalContext:
         # Resolve overrides against settings defaults
-        _use_hyde = use_hyde if use_hyde is not None else (
-            "hyde_generator" in self.retrieval_pipeline.graph.nodes
-        )
+        _use_hyde = use_hyde if use_hyde is not None else self.settings.hyde_enabled
         _use_crag = use_crag if use_crag is not None else self.settings.crag_enabled
         _crag_threshold = crag_threshold if crag_threshold is not None else self.settings.crag_score_threshold
         _crag_max_retries = crag_max_retries if crag_max_retries is not None else self.settings.crag_max_retries
@@ -98,10 +104,11 @@ class RetrievalEngine:
                 sub_q,
                 " (CRAG)" if _use_crag else "",
             )
+            pipeline = self._pipeline_for(_use_hyde)
             try:
                 if _use_crag:
                     docs, source_docs, low = await retrieve_with_crag(
-                        self.retrieval_pipeline,
+                        pipeline,
                         sub_q,
                         filters,
                         self.settings,
@@ -112,7 +119,7 @@ class RetrievalEngine:
                     low_confidence = low_confidence or low
                 else:
                     docs, source_docs = await run_retrieval(
-                        self.retrieval_pipeline,
+                        pipeline,
                         sub_q,
                         filters,
                         use_hyde=_use_hyde,

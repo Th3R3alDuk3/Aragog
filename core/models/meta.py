@@ -105,8 +105,16 @@ class EphemeralMeta(BaseModel):
     doc_beginning: str = Field(
         default="",
         description=(
-            "First N characters of the document — passed to ChunkAnalyzer "
-            "for LLM context, then excluded via model_dump(exclude={'doc_beginning'})."
+            "First N characters of the document — kept as fallback context, "
+            "excluded from Qdrant via model_dump(exclude={'doc_beginning', 'doc_content'})."
+        ),
+    )
+    doc_content: str = Field(
+        default="",
+        description=(
+            "Full document text — passed to ChunkAnalyzer as context for the "
+            "Anthropic Contextual Retrieval approach (situate each chunk in its document). "
+            "Excluded from Qdrant storage; stripped from parent docs in ParentChildSplitter."
         ),
     )
 

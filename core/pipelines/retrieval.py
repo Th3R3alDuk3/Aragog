@@ -19,6 +19,8 @@ def build_retrieval_pipeline(
     settings: Settings,
     children_store: QdrantDocumentStore,
     parents_store: QdrantDocumentStore,
+    *,
+    with_hyde: bool = False,
 ) -> AsyncPipeline:
     """Build the hybrid retrieval pipeline.
 
@@ -79,7 +81,7 @@ def build_retrieval_pipeline(
     # hyde_generator receives the raw query and emits a hypothetical passage;
     # its text output feeds dense_embedder_hyde so the LLM call is fully
     # encapsulated inside the pipeline.
-    if settings.hyde_enabled:
+    if with_hyde:
         from core.components.hyde import HyDE
         hyde_generator       = HyDE(
             openai_url=settings.openai_url,
@@ -110,7 +112,7 @@ def build_retrieval_pipeline(
     retrieval.add_component("joiner",                joiner)
     retrieval.add_component("auto_merging_retriever", auto_merger)
     retrieval.add_component("reranker",              reranker)
-    if settings.hyde_enabled:
+    if with_hyde:
         retrieval.add_component("hyde_generator",       hyde_generator)
         retrieval.add_component("dense_embedder_hyde",  dense_embedder_hyde)
         retrieval.add_component("dense_retriever_hyde", dense_retriever_hyde)
@@ -121,7 +123,7 @@ def build_retrieval_pipeline(
     retrieval.connect("dense_retriever.documents",        "joiner.documents")
     retrieval.connect("sparse_embedder.sparse_embedding", "sparse_retriever.query_sparse_embedding")
     retrieval.connect("sparse_retriever.documents",       "joiner.documents")
-    if settings.hyde_enabled:
+    if with_hyde:
         retrieval.connect("hyde_generator.text",            "dense_embedder_hyde.text")
         retrieval.connect("dense_embedder_hyde.embedding",  "dense_retriever_hyde.query_embedding")
         retrieval.connect("dense_retriever_hyde.documents", "joiner.documents")

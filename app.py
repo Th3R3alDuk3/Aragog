@@ -370,7 +370,7 @@ def build_demo() -> gr.Blocks:
     from core.config import get_settings
     s = get_settings()
 
-    with gr.Blocks(title="Advanced Hybrid RAG") as demo:
+    with gr.Blocks(title="Advanced Hybrid RAG", theme=gr.themes.Citrus()) as demo:
         gr.Markdown("# Advanced Hybrid RAG")
 
         with gr.Tabs():
@@ -393,17 +393,20 @@ def build_demo() -> gr.Blocks:
                                          placeholder="2024-12-31", scale=1)
 
                 with gr.Accordion("Erweiterte Einstellungen", open=False):
-                    with gr.Row():
-                        use_hyde = gr.Checkbox(
-                            label="HyDE – Hypothetical Document Embedding",
-                            value=s.hyde_enabled,
-                            info="Generiert ein hypothetisches Dokument zur Verbesserung des Dense-Retrievals.",
-                        )
-                        use_crag = gr.Checkbox(
-                            label="CRAG – Korrigierendes Retrieval",
-                            value=s.crag_enabled,
-                            info="Wiederholt das Retrieval mit einer reformulierten Anfrage bei niedriger Konfidenz.",
-                        )
+                    gr.Markdown("**HyDE – Hypothetical Document Embedding**")
+                    use_hyde = gr.Checkbox(
+                        label="HyDE aktivieren",
+                        value=s.hyde_enabled,
+                        info="Generiert ein hypothetisches Dokument zur Verbesserung des Dense-Retrievals. "
+                             "Benötigt einen LLM-Aufruf pro Anfrage.",
+                    )
+                    gr.Markdown("**CRAG – Korrigierendes Retrieval**")
+                    use_crag = gr.Checkbox(
+                        label="CRAG aktivieren",
+                        value=s.crag_enabled,
+                        info="Wiederholt das Retrieval mit einer reformulierten Anfrage, "
+                             "wenn der Reranker-Score unter dem Schwellenwert liegt.",
+                    )
                     with gr.Row():
                         crag_threshold = gr.Slider(
                             minimum=0.0, maximum=1.0, value=s.crag_score_threshold,
@@ -455,7 +458,8 @@ def build_demo() -> gr.Blocks:
                     use_raptor = gr.Checkbox(
                         label="RAPTOR – Hierarchische Zusammenfassungen",
                         value=s.raptor_enabled,
-                        info="Erzeugt zusätzliche Abschnitts- und Dokumentzusammenfassungen als Chunks.",
+                        info="Erzeugt zusätzliche Abschnitts- und Dokumentzusammenfassungen als Chunks "
+                             "(erhöht Indexierungszeit und benötigt LLM-Aufrufe).",
                     )
 
                 index_btn = gr.Button("Indizieren", variant="primary")

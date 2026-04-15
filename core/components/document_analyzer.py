@@ -180,6 +180,9 @@ def _apply(
     meta.embedding_model = embedding_model
     meta.embedding_provider = embedding_provider
     meta.embedding_dimension = embedding_dimension
+    # Full document content flows to ChunkAnalyzer for contextual prefix generation
+    # (Anthropic Contextual Retrieval approach). Stripped from Qdrant by ChunkAnalyzer._apply().
+    meta.doc_content = doc.content or ""
     return Document(content=doc.content or "", meta=meta.model_dump(), id=doc.id)
 
 
