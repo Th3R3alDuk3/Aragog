@@ -1,4 +1,6 @@
-# Advanced Hybrid RAG
+# Aragog 🕷️
+
+> **A**dvanced **R**etrieval **A**ugmented **G**eneration · **O**ptimized **G**eneration
 
 A local RAG system with a Gradio web UI and built-in MCP server.
 Two tabs — **Indexierung** for uploading documents, **Abfrage** for querying — backed by a fully local hybrid retrieval pipeline.

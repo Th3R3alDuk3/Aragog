@@ -1,5 +1,5 @@
 """
-Advanced Hybrid RAG – Gradio App
+Aragog – Advanced Hybrid RAG Gradio App
 
 Replaces the FastAPI + FastMCP adapters with a single Gradio application that has:
   - Tab "Abfrage"    : full RAG query (answer + sources) and retrieve-only mode
@@ -12,7 +12,7 @@ event bindings.
 Start with:
     uv run python app.py
 or (after `uv sync`):
-    advanced-rag
+    aragog
 """
 
 from __future__ import annotations

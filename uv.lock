@@ -29,63 +29,6 @@ wheels = [
 ]
 
 [[package]]
-name = "advanced-rag"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "datasets" },
-    { name = "dateparser" },
-    { name = "fastembed-haystack" },
-    { name = "gradio", extra = ["mcp"] },
-    { name = "haystack-ai" },
-    { name = "httpx" },
-    { name = "markdown-it-py" },
-    { name = "minio" },
-    { name = "nltk" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pylate" },
-    { name = "qdrant-haystack" },
-    { name = "ragas" },
-    { name = "sentence-transformers" },
-    { name = "torch" },
-    { name = "transformers" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "datasets", specifier = ">=2.0.0" },
-    { name = "dateparser", specifier = ">=1.2.1" },
-    { name = "fastembed-haystack", specifier = ">=2.1.0" },
-    { name = "gradio", extras = ["mcp"], specifier = ">=5.0.0" },
-    { name = "haystack-ai", specifier = ">=2.25.1" },
-    { name = "httpx", specifier = ">=0.27.0" },
-    { name = "markdown-it-py", specifier = ">=4.0.0" },
-    { name = "minio", specifier = ">=7.0.0" },
-    { name = "nltk", specifier = ">=3.9.1" },
-    { name = "openai", specifier = ">=1.0.0" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "pylate", specifier = ">=1.1.0" },
-    { name = "qdrant-haystack", specifier = ">=10.2.0" },
-    { name = "ragas", specifier = ">=0.2.0" },
-    { name = "sentence-transformers", specifier = ">=3.0.0" },
-    { name = "torch", specifier = ">=2.0.0" },
-    { name = "transformers", specifier = ">=4.40.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "ruff" }]
-
-[[package]]
 name = "aiohappyeyeballs"
 version = "2.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -231,6 +174,63 @@ sdist = { url = "https://files.pythonhosted.org/packages/d7/d8/05696357e0311f5b5
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/00/2344469e2084fb287c2e0b57b72910309874c3245463acd6cf5e3db69324/appdirs-1.4.4-py2.py3-none-any.whl", hash = "sha256:a841dacd6b99318a741b166adb07e19ee71a274450e68237b4650ca1055ab128", size = 9566, upload-time = "2020-05-11T07:59:49.499Z" },
 ]
+
+[[package]]
+name = "aragog"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "datasets" },
+    { name = "dateparser" },
+    { name = "fastembed-haystack" },
+    { name = "gradio", extra = ["mcp"] },
+    { name = "haystack-ai" },
+    { name = "httpx" },
+    { name = "markdown-it-py" },
+    { name = "minio" },
+    { name = "nltk" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pylate" },
+    { name = "qdrant-haystack" },
+    { name = "ragas" },
+    { name = "sentence-transformers" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "datasets", specifier = ">=2.0.0" },
+    { name = "dateparser", specifier = ">=1.2.1" },
+    { name = "fastembed-haystack", specifier = ">=2.1.0" },
+    { name = "gradio", extras = ["mcp"], specifier = ">=5.0.0" },
+    { name = "haystack-ai", specifier = ">=2.25.1" },
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "markdown-it-py", specifier = ">=4.0.0" },
+    { name = "minio", specifier = ">=7.0.0" },
+    { name = "nltk", specifier = ">=3.9.1" },
+    { name = "openai", specifier = ">=1.0.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pylate", specifier = ">=1.1.0" },
+    { name = "qdrant-haystack", specifier = ">=10.2.0" },
+    { name = "ragas", specifier = ">=0.2.0" },
+    { name = "sentence-transformers", specifier = ">=3.0.0" },
+    { name = "torch", specifier = ">=2.0.0" },
+    { name = "transformers", specifier = ">=4.40.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff" }]
 
 [[package]]
 name = "argon2-cffi"

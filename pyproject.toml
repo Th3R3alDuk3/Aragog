@@ -1,7 +1,7 @@
 [project]
-name = "advanced-rag"
+name = "aragog"
 version = "0.1.0"
-description = "Advanced Hybrid RAG – Gradio app with built-in MCP server"
+description = "Aragog (Advanced Retrieval Augmented Generation · Optimized Generation) – local hybrid RAG Gradio app with built-in MCP server"
 requires-python = ">=3.13"
 dependencies = [
     # Gradio UI + built-in MCP server (pip install gradio[mcp])
@@ -44,7 +44,7 @@ dependencies = [
 ]
 
 [project.scripts]
-advanced-rag = "app:main"
+aragog = "app:main"
 
 [build-system]
 requires = ["hatchling"]
