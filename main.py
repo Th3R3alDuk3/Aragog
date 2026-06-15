@@ -179,17 +179,10 @@ def _read_response(
     description=(
         "Search the knowledge base with dense (meaning) and sparse "
         "(exact-term) retrieval fused by the cross-encoder reranker — the "
-        "recommended default search and usual first step. Returns the top "
-        "reranked chunks with id, source, page, headings, a short snippet and "
-        "a temporary source URL.\n"
-        "Workflow:\n"
-        "1. Read the most relevant hits in full with `read_chunk` before "
-        "answering — never answer from snippets alone.\n"
-        "2. Decompose complex questions into several searches; reformulate "
-        "the query if results are weak.\n"
-        "3. Expand a good hit with `find_related` (same entities) or "
-        "`read_neighbors` (surrounding context).\n"
-        "4. Ground every statement in the chunks you read; cite source and page."
+        "recommended default; use it unless you specifically need a single "
+        "modality or metadata filters. Decompose complex questions into "
+        "several searches. Returns the top reranked chunks with id, source, "
+        "page, headings, a short snippet and a temporary source URL."
     ),
     annotations=ToolAnnotations(readOnlyHint=True),
 )
@@ -226,12 +219,11 @@ async def hybrid_search(
 @mcp.tool(
     name="dense_search",
     description=(
-        "Search the knowledge base by meaning (dense retrieval + "
-        "cross-encoder reranking). Returns the top reranked chunks with id, "
-        "source, page, headings, a short snippet and a temporary source URL. "
-        "Do not answer from the snippets alone — open promising hits with "
-        "`read_chunk` before answering (see `hybrid_search` for the full "
-        "workflow)."
+        "Search the knowledge base by meaning only (dense retrieval + "
+        "cross-encoder reranking) — use when you want pure semantic matching "
+        "rather than the hybrid default. Returns the top reranked chunks with "
+        "id, source, page, headings, a short snippet and a temporary source "
+        "URL."
     ),
     annotations=ToolAnnotations(readOnlyHint=True),
 )
@@ -267,11 +259,10 @@ async def dense_search(
     name="sparse_search",
     description=(
         "Search the knowledge base by exact terms (sparse/BM25 retrieval + "
-        "cross-encoder reranking). Returns the top reranked chunks with id, "
-        "source, page, headings, a short snippet and a temporary source URL. "
-        "Do not answer from the snippets alone — open promising hits with "
-        "`read_chunk` before answering (see `hybrid_search` for the full "
-        "workflow)."
+        "cross-encoder reranking) — use for specific keywords, names or codes "
+        "where exact wording matters rather than the hybrid default. Returns "
+        "the top reranked chunks with id, source, page, headings, a short "
+        "snippet and a temporary source URL."
     ),
     annotations=ToolAnnotations(readOnlyHint=True),
 )
@@ -307,12 +298,10 @@ async def sparse_search(
     name="filtered_search",
     description=(
         "Search the knowledge base by meaning, restricted by metadata "
-        "filters. Combine any of keywords, entities, content types, a content "
-        "date range and a file creation date range; all given filters must "
+        "filters — use to constrain results by keywords, entities, content "
+        "types or a date range. Combine any of the filters; all given must "
         "hold. Returns the top reranked chunks with id, source, page, "
-        "headings, a short snippet and a temporary source URL. Do not answer "
-        "from the snippets alone — open promising hits with `read_chunk` "
-        "before answering (see `hybrid_search` for the full workflow)."
+        "headings, a short snippet and a temporary source URL."
     ),
     annotations=ToolAnnotations(readOnlyHint=True),
 )
@@ -430,14 +419,11 @@ async def filtered_search(
     name="find_related",
     description=(
         "Find more chunks that mention the same entities (persons, "
-        "organizations, products, locations) as the given chunks — "
-        "associative multi-hop expansion from earlier search hits, ranked "
-        "against the query by the cross-encoder reranker and excluding the "
-        "given chunks themselves. Returns the top reranked chunks with id, "
-        "source, page, headings, a short snippet and a temporary source URL. "
-        "Do not answer from the snippets alone — open promising hits with "
-        "`read_chunk` before answering (see `hybrid_search` for the full "
-        "workflow)."
+        "organizations, products, locations) as the given chunks — use to "
+        "expand from earlier hits via shared entities (associative "
+        "multi-hop). Ranked against the query by the cross-encoder reranker, "
+        "excluding the given chunks. Returns the top reranked chunks with id, "
+        "source, page, headings, a short snippet and a temporary source URL."
     ),
     annotations=ToolAnnotations(readOnlyHint=True),
 )
