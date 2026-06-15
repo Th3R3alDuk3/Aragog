@@ -1,237 +1,161 @@
-# Aragog 🕷️
+<p align="center">
+  <img src="logo.png" alt="A-RAG-OG" width="220">
+</p>
 
-> **A**dvanced **R**etrieval **A**ugmented **G**eneration · **O**ptimized **G**eneration
+<h1 align="center">🧬 A-RAG-OG</h1>
 
-A local RAG system with a Gradio web UI and built-in MCP server.
-Two tabs — **Indexierung** for uploading documents, **Abfrage** for querying — backed by a fully local hybrid retrieval pipeline.
-
----
-
-## Architecture overview
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         INDEXING PIPELINE                           │
-│                                                                     │
-│  PDF/DOCX/…                                                         │
-│      │                                                              │
-│  Docling ──── v1 REST API ──→ docling-serve                         │
-│      │  (markdown)                                                  │
-│  DocumentAnalyzer  (doc_id, title, word_count, document_type,       │
-│      │              document_date/period, language via LLM)         │
-│  DocumentCleaner                                                    │
-│      │                                                              │
-│  ParentChildSplitter  ◄── HierarchicalDocumentSplitter              │
-│      │  • children (200 words) → children Qdrant collection         │
-│      │  • parents  (600 words) → parents  Qdrant collection         │
-│      │  • children carry __parent_id (AutoMergingRetriever)         │
-│      │                                                              │
-│  ChunkAnnotator  (chunk_index, section_title, section_path)         │
-│      │                                                              │
-│  ChunkAnalyzer  ◄── 1 LLM call / chunk (async, parallelised)        │
-│      │  • context_prefix  (injected into dense embedding text)      │
-│      │  • summary, keywords, classification                         │
-│      │  • entities: orgs, persons, locations, dates, …              │
-│      │                                                              │
-│  [RAPTOR]  ◄── RAPTOR_ENABLED  (section + doc summaries)            │
-│      │                                                              │
-│  FastembedSparseDocumentEmbedder  (BM42/SPLADE, local ONNX)         │
-│      │  sparse vector                                               │
-│      │                                                              │
-│  DenseContextInjector  (context_prefix + original_content)          │
-│      │                                                              │
-│  SentenceTransformersDocumentEmbedder  (BAAI/bge-m3, local)         │
-│      │  dense vector (1024 dim)                                     │
-│      │                                                              │
-│  QdrantDocumentStore (children + parents)                           │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────┐
-│                        RETRIEVAL PIPELINE                           │
-│                                                                     │
-│  User query                                                         │
-│      │                                                              │
-│  QueryAnalyzer  (LLM: decompose + extract metadata filters)         │
-│      │  ["What is X?", "How does Y work?"]                          │
-│      │                                                              │
-│  For each sub-question:                                             │
-│      ├─ SentenceTransformersTextEmbedder → dense vector             │
-│      │       └──→ QdrantEmbeddingRetriever                          │
-│      ├─ FastembedSparseTextEmbedder → sparse vector                 │
-│      │       └──→ QdrantSparseEmbeddingRetriever                    │
-│      └─ [HyDE → dense]  (HYDE_ENABLED)                             │
-│                                                                     │
-│  DocumentJoiner  (Reciprocal Rank Fusion)                           │
-│      │                                                              │
-│  AutoMergingRetriever  ← parent-context swap (threshold-based)      │
-│      │                                                              │
-│  [ColBERT]  (COLBERT_ENABLED)  ← pre-filter → top 20               │
-│      │                                                              │
-│  SentenceTransformersSimilarityRanker  (bge-reranker-v2-m3) → top 5 │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-Generation (separate Haystack pipeline):
-
-  PromptBuilder  (multi-question Jinja2 template)
-      │
-  OpenAIGenerator  (any OpenAI-compatible endpoint)
-      │
-  AnswerBuilder
-```
+<p align="center">
+  <b>Agentic RAG, Off Grid</b> — a self-hosted hybrid-RAG <b>MCP server</b> for OpenWebUI:<br>
+  structure-aware indexing, hybrid retrieval and cross-encoder reranking, exposed as tools an LLM agent drives.
+</p>
 
 ---
 
-## Tech stack
+## ✨ What it is
 
-| Component | Technology |
-|-----------|------------|
-| UI + MCP server | **Gradio** (`gradio[mcp]`) |
-| RAG framework | **Haystack 2.x** |
-| Vector database | **Qdrant** — native dense + sparse vectors |
-| Document extraction | **docling-serve** — PDF/DOCX/PPTX → markdown |
-| Dense embeddings | **BAAI/bge-m3** — multilingual, 1024 dim (local) |
-| Sparse embeddings | **BM42 / SPLADE** — learned sparse (local ONNX) |
-| Hybrid fusion | **RRF** — Reciprocal Rank Fusion |
-| Reranker (pass 1) | **ColBERT** colbert-ir/colbertv2.0 — pre-filter, top 20 |
-| Reranker (pass 2) | **BAAI/bge-reranker-v2-m3** — cross-encoder, top 5 (local) |
-| LLM | **OpenAI-compatible** — OpenAI, Ollama, vLLM, Groq, … |
-| Contextual chunking | **Anthropic Option A** — context prefix + parent-child split |
-| Multi-question | **QueryAnalyzer** — detects compound queries, retrieves per sub-question |
-| HyDE | Hypothetical document for improved dense retrieval |
-| RAPTOR | Hierarchical section + document summary chunks |
-| CRAG | Score-threshold retry with LLM query reformulation |
-| Evaluation | **RAGAS** — faithfulness, answer relevancy, context precision |
-| Object storage | **MinIO** — stores original uploaded files |
+A-RAG-OG indexes documents into a single hybrid (dense + sparse) Qdrant store and exposes **retrieval as MCP tools**. The agent lives in **OpenWebUI** — its model decides which tool to call, searches in several rounds, reads promising chunks and grounds its answer. This service stays a thin, stateless retrieval layer.
+
+| Part | Description |
+|------|-------------|
+| 🧩 **HybridChunker** | Docling token- *and* structure-aware chunking, heading path prepended (contextual) |
+| 🏷️ **LLM Enrichment** | Per chunk: context, keywords, headings, entities, date |
+| 🔄 **Hybrid Retrieval** | Dense (bge-m3) + Sparse (BM25), one Qdrant store |
+| 📑 **Reranking** | bge-reranker-v2-m3 cross-encoder, `top_k` before/after per call |
+| 🔌 **MCP Server** | FastMCP (streamable-http) + OpenWebUI JWT auth |
+| 🤖 **Agent** | OpenWebUI's model orchestrates the tools (A-RAG style) |
 
 ---
 
-## Runtime-toggleable SOTA features
+## 🧰 MCP Tools
 
-All advanced features default to the values in `.env` and can be overridden per request in the UI without restarting the server.
+| Tool | Purpose |
+|------|---------|
+| `hybrid_search(query, top_k_before, top_k_after)` | **Default** — dense + sparse, fused by reranker |
+| `dense_search(query, top_k_before, top_k_after)` | Dense retrieval (by meaning) + rerank |
+| `sparse_search(query, top_k_before, top_k_after)` | Sparse/BM25 retrieval (exact terms) + rerank |
+| `filtered_search(query, keywords, entities, content_types, date_from, date_to, …)` | Dense + metadata filter + rerank |
+| `find_related(chunk_ids, query, …)` | Associative multi-hop — more chunks sharing the hits' entities |
+| `read_chunk(chunk_ids)` | Full content of chunks by id |
+| `read_neighbors(chunk_ids, window)` | Full content of the chunks surrounding a hit (document order) |
 
-### Abfrage tab — Erweiterte Einstellungen
-
-| Setting | `.env` key | What it does |
-|---------|-----------|--------------|
-| **HyDE** | `HYDE_ENABLED` | Generates a hypothetical answer document before dense retrieval to improve embedding alignment. Toggleable at request time (skips the HyDE branch in the pipeline). |
-| **CRAG** | `CRAG_ENABLED` | If the top reranker score is below the threshold, reformulates the query via LLM and retries retrieval. |
-| **CRAG Score-Schwelle** | `CRAG_SCORE_THRESHOLD` | Minimum score (0–1) to consider a retrieval result confident enough. |
-| **CRAG Max. Wiederholungen** | `CRAG_MAX_RETRIES` | How many reformulation attempts to make before accepting a low-confidence result. |
-
-> **ColBERT** (`COLBERT_ENABLED`) is wired as a fixed graph edge  
-> `auto_merging_retriever → colbert_reranker → reranker`  
-> and cannot be toggled at runtime. Change `COLBERT_ENABLED` in `.env` and restart.
-
-### Indexierung tab — Erweiterte Einstellungen
-
-| Setting | `.env` key | What it does |
-|---------|-----------|--------------|
-| **RAPTOR** | `RAPTOR_ENABLED` | Builds additional summary chunks at section and document level for better abstract-query coverage. Can be disabled per upload to speed up indexing. |
+Each search returns chunk ids + snippets; the agent reads full chunks with `read_chunk`
+or pulls surrounding context with `read_neighbors`.
 
 ---
 
-## Quickstart
-
-### 1. Start services
-
-```bash
-docker compose up -d
-# Qdrant:  http://localhost:6333/dashboard
-# MinIO:   http://localhost:9001
-# Docling: http://localhost:5001
-```
-
-### 2. Configure
+## 🚀 Quick Start
 
 ```bash
 cp .env.example .env
-# Required:
-#   OPENAI_API_KEY / OPENAI_URL   (or point to Ollama, see .env)
-#   EMBEDDING_MODEL               (default: BAAI/bge-m3)
-#   RERANKER_MODEL                (default: BAAI/bge-reranker-v2-m3)
+
+# Backing services (Qdrant, MinIO, Docling converter)
+docker compose --profile docling up -d
+
+# Index documents (standalone: uploads to MinIO + builds the store)
+uv run python index.py path/to/doc1.pdf path/to/doc2.pdf
+
+# Run the MCP server
+uv run python main.py
 ```
 
-### 3. Install & run
+The MCP server listens on `http://HOST:PORT` (default `0.0.0.0:8000`, streamable-http). Point OpenWebUI's MCP integration at it; the five tools become available to the agent.
+
+> **First run:** the chunker tokenizer (HF) and the sparse BM25 model (FastEmbed) download into `./data` on first use — set `HF_HUB_OFFLINE=0`, then switch back to `1` for offline startups. Dense embeddings and reranking are served by external OpenAI-/`/rerank`-compatible endpoints (configure their URLs in `.env`).
+
+---
+
+## 🏗️ Flow
+
+```
+index.py  →  MinIO + Docling HybridChunker → enrich → dense+sparse embed → Qdrant
+main.py   →  FastMCP tools → (dense|sparse) retrieve → cross-encoder rerank → snippets
+OpenWebUI →  agent: search → read → reason → answer (cites chunk ids)
+```
+
+---
+
+## ⚙️ Configuration
+
+All settings live in `.env` (see `.env.example`).
+
+### 🖥️ Server
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | 0.0.0.0 | MCP bind host |
+| `PORT` | 8000 | MCP port (streamable-http) |
+
+### 🔐 Auth (OpenWebUI JWT)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_SECRET` | – | OpenWebUI JWT verification key |
+| `JWT_ALGORITHM` | HS256 | JWT algorithm |
+
+### 🗂️ S3 Storage (indexing)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MINIO_ENDPOINT` | localhost:9000 | S3 endpoint |
+| `MINIO_BUCKET` | default | Bucket for indexed files |
+| `MINIO_URL_EXPIRE` | 3600 | Lifetime (s) of presigned source URLs in search results |
+
+### 🗄️ Document Store
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QDRANT_URL` | http://localhost:6333 | Qdrant URL |
+| `QDRANT_EMBEDDING_DIM` | 1024 | Dense embedding dimension |
+| `QDRANT_COLLECTION` | aragog | Qdrant collection |
+
+### 📑 Converter
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCLING_URL` | http://localhost:5001 | Docling-serve endpoint |
+| `DOCLING_TIMEOUT` | 600 | Per-request & job timeout (s) |
+
+### 🧩 Document Chunker
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CHUNKER_TOKENIZER` | BAAI/bge-m3 | HF tokenizer used to count chunk tokens (match the embedding model) |
+| `CHUNKER_MAX_TOKENS` | 1000 | HybridChunker token budget |
+
+### 🏷️ Enricher
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENRICHER_MAX_WORKERS` | 3 | Parallel LLM metadata extractions |
+| `OPENAI_URL` | http://localhost:11434/v1 | OpenAI-compatible endpoint (enrichment) |
+| `OPENAI_MODEL` | gemma4:e4b | Enrichment model |
+
+### 🔮 Embedders (Dense + Sparse)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DENSE_EMBEDDING_MODEL` | bge-m3:567m | Dense model id on the embedding server (multilingual, 1024-dim) |
+| `DENSE_EMBEDDING_URL` | http://localhost:11434/v1 | OpenAI-compatible embeddings endpoint (Ollama by default; also vLLM/TEI/Infinity) |
+| `SPARSE_EMBEDDING_MODEL` | Qdrant/bm25 | Sparse model (FastEmbed, runs locally) |
+| `SPARSE_EMBEDDING_LANGUAGE` | german | BM25 stop-word / stemming language |
+| `SPARSE_EMBEDDING_DEVICE` | cpu | Device for the sparse model (`cpu` or `cuda`) |
+| `EMBEDDED_META_FIELDS` | context,keywords,headings,hypothetical_questions | Meta fields embedded with content (dense + sparse) |
+
+### 🔁 Reranker
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RERANKER_MODEL` | BAAI/bge-reranker-v2-m3 | Reranker model id on the rerank server |
+| `RERANKER_URL` | http://localhost:8001/v1 | vLLM base URL (VLLMRanker calls its `/rerank`) |
+
+---
+
+## 🐳 Backing Services
 
 ```bash
-# Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-uv sync
-uv run python app.py
-# → http://localhost:8000
+docker compose up -d                     # MinIO + Qdrant
+docker compose --profile docling up -d   # + Docling converter
 ```
 
-### 4. Managing packages
-
-```bash
-uv add <package>        # add a runtime dependency
-uv add --dev <package>  # add a dev dependency
-uv remove <package>     # remove a dependency
-uv sync                 # reinstall from pyproject.toml + uv.lock
-```
+| Service | Port | Profile | Description |
+|---------|------|---------|-------------|
+| Qdrant | 6333 | – | Vector database (REST + dashboard) |
+| MinIO | 9000 / 9001 | – | S3 API / console |
+| Docling | 5001 | `docling` | Document converter |
 
 ---
 
-## MCP server
+## 📄 License
 
-The Gradio app starts a built-in MCP server automatically (`mcp_server=True`).
-Two tools are exposed:
-
-| Tool | Description |
-|------|-------------|
-| `rag_query` | Answer a question with generated response + grounded sources |
-| `rag_retrieve` | Return relevant passages without generation |
-
-MCP endpoint: `http://localhost:8000/gradio_api/mcp/sse`
-
----
-
-## LLM backends
-
-| Backend | `OPENAI_URL` | `OPENAI_API_KEY` | `LLM_MODEL` |
-|---------|-------------|-----------------|-------------|
-| OpenAI | *(empty)* | `sk-…` | `gpt-4o-mini` |
-| Ollama | `http://localhost:11434/v1` | `ollama` | `llama3.2` |
-| vLLM | `http://localhost:8000/v1` | `token-abc` | `mistralai/Mistral-7B-…` |
-| Groq | `https://api.groq.com/openai/v1` | `gsk_…` | `llama-3.1-70b-versatile` |
-| LM Studio | `http://localhost:1234/v1` | `lm-studio` | `<loaded model>` |
-
----
-
-## Supported document formats
-
-PDF, DOCX, PPTX, XLSX, HTML, TXT, Markdown — all converted via docling-serve.
-
----
-
-## Project structure
-
-```text
-.
-├── app.py          ← entry point (Gradio UI + MCP server)
-├── docker-compose.yml     ← Qdrant + MinIO + docling-serve
-├── .env                   ← all configuration
-├── pyproject.toml         ← dependencies + console entry point
-├── docs/
-│   ├── architecture.md    ← design decisions and runtime layout
-│   └── code_style.md      ← coding standard
-└── core/
-    ├── config.py          ← settings model (pydantic-settings)
-    ├── runtime.py         ← shared RagRuntime
-    ├── models/            ← query, retrieval, indexing, task models
-    ├── components/        ← Haystack components (HyDE, ColBERT, RAPTOR, …)
-    ├── pipelines/         ← indexing, retrieval, generation pipelines
-    ├── services/          ← QueryEngine, RetrievalEngine, IndexingService
-    └── storage/           ← Qdrant, MinIO, TaskStore
-```
-
----
-
-## Configuration reference
-
-See [.env.example](.env.example) for all settings with inline documentation.  
-See [core/config.py](core/config.py) for the settings model.  
-See [docs/architecture.md](docs/architecture.md) for design decisions.
+[MIT](LICENSE)

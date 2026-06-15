@@ -1,0 +1,15 @@
+[
+  {
+    "query": "How long is the warranty on Product X?",
+    "relevant_chunk_ids": [
+      "REPLACE_WITH_A_RELEVANT_CHUNK_ID",
+      "REPLACE_WITH_ANOTHER_RELEVANT_CHUNK_ID"
+    ]
+  },
+  {
+    "query": "Wer hat den Rahmenvertrag unterzeichnet?",
+    "relevant_chunk_ids": [
+      "REPLACE_WITH_A_RELEVANT_CHUNK_ID"
+    ]
+  }
+]

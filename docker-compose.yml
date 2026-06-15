@@ -1,49 +1,92 @@
 services:
 
+  app:
+    profiles:
+      - app
+    build: .
+    container_name: hybridrag
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - minio
+      - qdrant
+
+  minio:
+    image: docker.io/minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web UI
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
+    command: server /data --console-address ":9001"
+
   qdrant:
-    image: qdrant/qdrant:latest
+    image: docker.io/qdrant/qdrant:latest
     container_name: qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"   # HTTP / REST + Web UI
-      - "6334:6334"   # gRPC (faster for bulk writes)
+      - "6333:6333" # HTTP/REST + Web UI
+      - "6334:6334" # gRPC (faster for bulk writes)
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
       QDRANT__LOG_LEVEL: INFO
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
-
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    restart: unless-stopped
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console
-    environment:
-      MINIO_ROOT_USER:     ${MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
+      QDRANT__SERVICE__API_KEY: ${QDRANT_TOKEN}
+  
+  ###################
+  # OPTIONAL 
+  ###################
 
   docling:
-    image: ghcr.io/docling-project/docling-serve:latest
+    profiles:
+    - docling
+    image: quay.io/docling-project/docling-serve:latest
     container_name: docling
     restart: unless-stopped
     ports:
       - "5001:5001"
     environment:
-      DOCLING_SERVE_ENABLE_UI: "true"
-      DOCLING_SERVE_MAX_WORKERS: ${DOCLING_MAX_WORKERS:-4}
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+      - DOCLING_SERVE_ENABLE_UI=True
+      - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_TIMEOUT}
+
+  reranker:
+    profiles:
+      - vllm
+    image: vllm/vllm-openai:latest
+    container_name: vllm
+    restart: unless-stopped
+    ipc: host
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data/huggingface:/root/.cache/huggingface
+    command: >
+      ${RERANKER_MODEL}
+      --served-model-name=${RERANKER_MODEL}
+      --runner=pooling
+      --gpu-memory-utilization=0.20
+      --max-model-len=4096
+      --enforce-eager
+      --host=0.0.0.0
+      --port=8000
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
 volumes:
-  qdrant_data:
   minio_data:
+    driver: local
+  qdrant_data:
+    driver: local

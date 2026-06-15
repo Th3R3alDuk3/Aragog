@@ -1,0 +1,512 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastmcp import Context, FastMCP
+from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.utilities.logging import configure_logging
+from haystack import Document
+from mcp.types import ToolAnnotations
+from pydantic import Field
+
+from config import get_settings
+from models.results import ChunkContent, SearchHit
+from pipelines._factories import build_document_store
+from pipelines.retrieval import (
+    build_dense_retrieval_pipeline,
+    build_sparse_retrieval_pipeline,
+    build_hybrid_retrieval_pipeline,
+)
+from services.storage import MinioStore
+
+
+configure_logging()
+
+
+#--------------------------------------------
+# GLOBALS
+#--------------------------------------------
+
+
+settings = get_settings()
+
+
+#--------------------------------------------
+# SERVER
+#--------------------------------------------
+
+
+@asynccontextmanager
+async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
+
+    document_store = build_document_store()
+
+    yield {
+        "document_store": document_store,
+        "minio_store": MinioStore(
+            settings.minio_endpoint,
+            settings.minio_user,
+            settings.minio_password,
+            settings.minio_bucket,
+        ),
+        "dense_pipeline": build_dense_retrieval_pipeline(document_store),
+        "sparse_pipeline": build_sparse_retrieval_pipeline(document_store),
+        "hybrid_pipeline": build_hybrid_retrieval_pipeline(document_store),
+    }
+
+
+INSTRUCTIONS = """\
+A-RAG-OG exposes tools to search and read a document knowledge base.
+
+Workflow: use `hybrid_search` for most queries (combines meaning + exact terms, the
+recommended default); use `dense_search` (by meaning) or `sparse_search` (by exact
+terms) only when you specifically want one modality, or `filtered_search` to restrict
+by keywords, entities, content types or date. Use `find_related` to pull more chunks that mention the
+same entities as a promising hit (associative multi-hop). Each search returns chunk ids
+with short snippets; call
+`read_chunk` to read promising chunks in full, or `read_neighbors` to read the chunks
+immediately before and after a hit when you need its surrounding context. Decompose complex questions and search
+in several rounds. Ground every answer strictly in the retrieved chunks and cite their ids.
+""".strip()
+
+auth = JWTVerifier(
+    public_key=settings.jwt_secret,
+    algorithm=settings.jwt_algorithm,
+)
+
+mcp = FastMCP(
+    name="A-RAG-OG",
+    instructions=INSTRUCTIONS,
+    auth=auth,
+    lifespan=lifespan,
+)
+
+
+#--------------------------------------------
+# HELPERS
+#--------------------------------------------
+
+
+_ENTITY_FIELDS = (
+    "ent_persons",
+    "ent_organizations",
+    "ent_products",
+    "ent_locations",
+)
+
+
+def _search_hits(
+    documents: list[Document],
+    minio_store: MinioStore,
+) -> list[SearchHit]:
+    return [SearchHit(
+        id=document.id,
+        score=document.score,
+        source=document.meta.get("source"),
+        url=minio_store.presigned_url(
+            document.meta.get("source"), settings.minio_url_expire),
+        page=document.meta.get("page_number"),
+        headings=document.meta.get("headings", []),
+        snippet=document.meta.get("context") or (document.content or "")[:300],
+    ) for document in documents]
+
+
+def _chunk_contents(
+    documents: list[Document],
+    minio_store: MinioStore,
+) -> list[ChunkContent]:
+    return [ChunkContent(
+        id=document.id,
+        source=document.meta.get("source"),
+        url=minio_store.presigned_url(
+            document.meta.get("source"), settings.minio_url_expire),
+        page=document.meta.get("page_number"),
+        content=document.content,
+    ) for document in documents]
+
+
+#--------------------------------------------
+# TOOLS
+#--------------------------------------------
+
+
+@mcp.tool(
+    name="hybrid_search",
+    description=(
+        "Search the knowledge base with dense (meaning) and sparse (exact-term) retrieval "
+        "fused by the cross-encoder reranker — the recommended default search. Returns the "
+        "top reranked chunks with id, source, page, headings, a short snippet and a temporary "
+        "source URL. Read a promising chunk in full with `read_chunk`."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def hybrid_search(
+    ctx: Context,
+    query: str = Field(
+        description="A natural language query.",
+    ),
+    top_k_before: int = Field(
+        default=30,
+        description="Number of candidate chunks to retrieve from each of dense and sparse before reranking. Defaults to 30.",
+    ),
+    top_k_after: int = Field(
+        default=5,
+        description="Number of chunks to return after reranking. Defaults to 5.",
+    ),
+) -> list[SearchHit]:
+
+    result = await ctx.lifespan_context["hybrid_pipeline"].run_async({
+        "dense_embedder": {"text": query},
+        "sparse_embedder": {"text": query},
+        "dense_retriever": {"top_k": top_k_before},
+        "sparse_retriever": {"top_k": top_k_before},
+        "reranker": {"query": query, "top_k": top_k_after},
+    })
+
+    return _search_hits(
+        result["reranker"]["documents"],
+        ctx.lifespan_context["minio_store"],
+    )
+
+
+@mcp.tool(
+    name="dense_search",
+    description=(
+        "Search the knowledge base by meaning (dense retrieval + cross-encoder "
+        "reranking). Returns the top reranked chunks with id, source, page, headings, "
+        "a short snippet and a temporary source URL. Read a promising chunk in full with `read_chunk`."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def dense_search(
+    ctx: Context,
+    query: str = Field(
+        description="A natural language query.",
+    ),
+    top_k_before: int = Field(
+        default=30,
+        description="Number of candidate chunks to retrieve before reranking. Defaults to 30.",
+    ),
+    top_k_after: int = Field(
+        default=5,
+        description="Number of chunks to return after reranking. Defaults to 5.",
+    ),
+) -> list[SearchHit]:
+
+    result = await ctx.lifespan_context["dense_pipeline"].run_async({
+        "embedder": {"text": query},
+        "retriever": {"top_k": top_k_before},
+        "reranker": {"query": query, "top_k": top_k_after},
+    })
+
+    return _search_hits(
+        result["reranker"]["documents"],
+        ctx.lifespan_context["minio_store"],
+    )
+
+
+@mcp.tool(
+    name="sparse_search",
+    description=(
+        "Search the knowledge base by exact terms (sparse/BM25 retrieval + cross-encoder "
+        "reranking). Returns the top reranked chunks with id, source, page, headings, "
+        "a short snippet and a temporary source URL. Read a promising chunk in full with `read_chunk`."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def sparse_search(
+    ctx: Context,
+    query: str = Field(
+        description="The keywords or exact terms to look up.",
+    ),
+    top_k_before: int = Field(
+        default=30,
+        description="Number of candidate chunks to retrieve before reranking. Defaults to 30.",
+    ),
+    top_k_after: int = Field(
+        default=5,
+        description="Number of chunks to return after reranking. Defaults to 5.",
+    ),
+) -> list[SearchHit]:
+
+    result = await ctx.lifespan_context["sparse_pipeline"].run_async({
+        "embedder": {"text": query},
+        "retriever": {"top_k": top_k_before},
+        "reranker": {"query": query, "top_k": top_k_after},
+    })
+
+    return _search_hits(
+        result["reranker"]["documents"],
+        ctx.lifespan_context["minio_store"],
+    )
+
+
+@mcp.tool(
+    name="filtered_search",
+    description=(
+        "Search the knowledge base by meaning, restricted by metadata filters. Combine "
+        "any of keywords, entities, content types, a content date range and a file creation "
+        "date range; all given filters must hold. Returns "
+        "the top reranked chunks with id, source, page, headings, a short snippet and a "
+        "temporary source URL."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def filtered_search(
+    ctx: Context,
+    query: str = Field(
+        description="A natural language query.",
+    ),
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="A chunk matches if it carries any of these keywords.",
+    ),
+    entities: list[str] = Field(
+        default_factory=list,
+        description="A chunk matches if it mentions any of these entities (persons, organizations, products, locations).",
+    ),
+    content_types: list[str] = Field(
+        default_factory=list,
+        description="A chunk matches if it contains any of these structural element types (e.g. 'table', 'text', 'list_item', 'code', 'formula', 'picture', 'section_header').",
+    ),
+    date_from: str = Field(
+        default="",
+        description="Earliest date (ISO YYYY-MM-DD) the chunk may refer to.",
+    ),
+    date_to: str = Field(
+        default="",
+        description="Latest date (ISO YYYY-MM-DD) the chunk may refer to.",
+    ),
+    created_from: str = Field(
+        default="",
+        description="Earliest creation date (ISO YYYY-MM-DD) of the source file the chunk comes from.",
+    ),
+    created_to: str = Field(
+        default="",
+        description="Latest creation date (ISO YYYY-MM-DD) of the source file, inclusive of the whole day.",
+    ),
+    top_k_before: int = Field(
+        default=30,
+        description="Number of candidate chunks to retrieve before reranking. Defaults to 30.",
+    ),
+    top_k_after: int = Field(
+        default=5,
+        description="Number of chunks to return after reranking. Defaults to 5.",
+    ),
+) -> list[SearchHit]:
+
+    conditions: list[dict] = []
+
+    if keywords:
+        conditions.append(
+            {"field": "meta.keywords", "operator": "in", "value": keywords})
+
+    if entities:
+        conditions.append({
+            "operator": "OR",
+            "conditions": [{
+                "field": f"meta.{field}", "operator": "in", "value": entities
+            } for field in _ENTITY_FIELDS]
+        })
+
+    if content_types:
+        conditions.append(
+            {"field": "meta.content_types", "operator": "in", "value": content_types})
+
+    if date_from:
+        conditions.append(
+            {"field": "meta.dates", "operator": ">=", "value": date_from})
+
+    if date_to:
+        conditions.append(
+            {"field": "meta.dates", "operator": "<=", "value": date_to})
+
+    if created_from:
+        conditions.append(
+            {"field": "meta.created_at", "operator": ">=", "value": created_from})
+
+    if created_to:
+        upper = created_to if "T" in created_to else f"{created_to}T23:59:59"
+        conditions.append(
+            {"field": "meta.created_at", "operator": "<=", "value": upper})
+
+    result = await ctx.lifespan_context["dense_pipeline"].run_async({
+        "embedder": {"text": query},
+        "retriever": {
+            "top_k": top_k_before,
+            "filters": {
+                "operator": "AND", 
+                "conditions": conditions
+            } if conditions else None,
+        },
+        "reranker": {"query": query, "top_k": top_k_after},
+    })
+
+    return _search_hits(
+        result["reranker"]["documents"],
+        ctx.lifespan_context["minio_store"],
+    )
+
+
+@mcp.tool(
+    name="find_related",
+    description=(
+        "Find more chunks that mention the same entities (persons, organizations, products, "
+        "locations) as the given chunks — associative multi-hop expansion from earlier search "
+        "hits, ranked against the query by the cross-encoder reranker and excluding the given "
+        "chunks themselves. Returns the top reranked chunks with id, source, page, headings, a "
+        "short snippet and a temporary source URL."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def find_related(
+    ctx: Context,
+    chunk_ids: list[str] = Field(
+        description="Chunk ids (from a previous search result) whose entities define the expansion.",
+    ),
+    query: str = Field(
+        description="A natural language query the related chunks are ranked against.",
+    ),
+    top_k_before: int = Field(
+        default=30,
+        description="Number of candidate chunks to retrieve before reranking. Defaults to 30.",
+    ),
+    top_k_after: int = Field(
+        default=5,
+        description="Number of chunks to return after reranking. Defaults to 5.",
+    ),
+) -> list[SearchHit]:
+
+    seeds = await ctx.lifespan_context["document_store"].filter_documents_async(
+        filters={"field": "id", "operator": "in", "value": chunk_ids})
+
+    entities = sorted({
+        entity
+        for seed in seeds
+        for field in _ENTITY_FIELDS
+        for entity in seed.meta.get(field, [])
+    })
+
+    if not entities:
+        return []
+
+    result = await ctx.lifespan_context["dense_pipeline"].run_async({
+        "embedder": {"text": query},
+        "retriever": {
+            "top_k": top_k_before,
+            "filters": {
+                "operator": "AND",
+                "conditions": [
+                    {"field": "id", "operator": "not in", "value": chunk_ids},
+                    {"operator": "OR", "conditions": [
+                        {"field": f"meta.{field}", "operator": "in", "value": entities}
+                        for field in _ENTITY_FIELDS
+                    ]},
+                ],
+            },
+        },
+        "reranker": {"query": query, "top_k": top_k_after},
+    })
+
+    return _search_hits(
+        result["reranker"]["documents"],
+        ctx.lifespan_context["minio_store"],
+    )
+
+
+@mcp.tool(
+    name="read_chunk",
+    description=(
+        "Read the full content of chunks by their ids (from a search result). Returns "
+        "each chunk with id, source, page, full content and a temporary source URL."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def read_chunk(
+    ctx: Context,
+    chunk_ids: list[str] = Field(
+        description="The chunk ids to read in full.",
+    ),
+) -> list[ChunkContent]:
+
+    documents = await ctx.lifespan_context["document_store"].filter_documents_async(
+        filters={"field": "id", "operator": "in", "value": chunk_ids})
+
+    return _chunk_contents(
+        documents,
+        ctx.lifespan_context["minio_store"],
+    )
+
+
+@mcp.tool(
+    name="read_neighbors",
+    description=(
+        "Read the chunks surrounding given chunks within their source document — the "
+        "contiguous passage of up to `window` chunks before and after each id, in document "
+        "order. Use this to recover the context around a promising search hit. Returns each "
+        "chunk with id, source, page, full content and a temporary source URL."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True),
+)
+async def read_neighbors(
+    ctx: Context,
+    chunk_ids: list[str] = Field(
+        description="The chunk ids (from a search result) to read the surrounding context of.",
+    ),
+    window: int = Field(
+        default=1,
+        description="How many chunks before and after each id to include. Defaults to 1.",
+    ),
+) -> list[ChunkContent]:
+
+    document_store = ctx.lifespan_context["document_store"]
+
+    seeds = await document_store.filter_documents_async(
+        filters={"field": "id", "operator": "in", "value": chunk_ids})
+
+    conditions: list[dict] = []
+
+    for seed in seeds:
+
+        index = seed.meta.get("chunk_index")
+        if index is None:
+            continue
+
+        total_chunks = seed.meta.get("total_chunks", index + window + 1)
+        conditions.append({
+            "operator": "AND",
+            "conditions": [
+                {"field": "meta.source", "operator": "==", "value": seed.meta.get("source")},
+                {"field": "meta.chunk_index", "operator": "in", "value": [
+                    neighbor
+                    for neighbor in range(index - window, index + window + 1)
+                    if 0 <= neighbor < total_chunks
+                ]},
+            ],
+        })
+
+    if not conditions:
+        return []
+
+    neighbors = await document_store.filter_documents_async(
+        filters={"operator": "OR", "conditions": conditions})
+
+    neighbors.sort(key=lambda document: (
+        document.meta.get("source") or "",
+        document.meta.get("chunk_index", 0),
+    ))
+
+    return _chunk_contents(
+        neighbors,
+        ctx.lifespan_context["minio_store"],
+    )
+
+
+if __name__ == "__main__":
+    mcp.run(
+        host=settings.host,
+        port=settings.port,
+        transport="streamable-http",
+    )

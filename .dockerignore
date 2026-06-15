@@ -1,5 +1,6 @@
 .env
 .venv
+.git
 docs
 data
 tests
