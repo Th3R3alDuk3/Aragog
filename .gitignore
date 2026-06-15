@@ -3,6 +3,5 @@
 docs
 data
 tests
-*.pyc
 __pycache__
 BACKLOG.md

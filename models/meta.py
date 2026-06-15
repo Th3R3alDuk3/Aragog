@@ -5,19 +5,21 @@ class Meta(BaseModel):
     context: str = Field(
         default="",
         description=(
-            "2-3 sentences that situate this chunk within the overall document AND state its key "
-            "point: use the heading path at the start of the chunk to name the document's "
-            "topic/section so the chunk is self-contained, then summarize what the chunk says "
-            "(e.g. 'This section of the Product X manual covers the warranty: 24 months from "
-            "delivery, wearing parts excluded.'). Written in the chunk's language to improve retrieval."
+            "2-3 full sentences that situate this chunk within the overall document AND state its key "
+            "point: use the document title and the heading path at the start of the chunk to name what "
+            "the chunk is about, then summarize what the chunk actually says (e.g. 'This section of the "
+            "Product X manual covers the warranty: 24 months from delivery, wearing parts excluded.'). "
+            "Do not simply repeat the heading or title — write complete sentences describing the chunk's "
+            "content. Written in the chunk's language to improve retrieval."
         ),
     )
     keywords: list[str] = Field(
         default=[],
         description=(
-            "The most salient terms or phrases in this chunk — domain terms and named concepts "
-            "as they appear in the text (e.g. ['Garantiezeit', 'Lieferdatum']). Empty list if "
-            "none stand out."
+            "3-8 single words or short noun phrases (max 3 words each) capturing the most salient "
+            "domain terms and named concepts as they appear in the text (e.g. ['Garantiezeit', "
+            "'Lieferdatum']), excluding names already captured as entities. Never full sentences. "
+            "Empty list if none stand out."
         ),
     )
     hypothetical_questions: list[str] = Field(

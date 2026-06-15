@@ -26,19 +26,24 @@ settings = get_settings()
 
 
 def _build_structured_generator(format_model) -> OpenAIChatGenerator:
+
+    generation_kwargs = {
+        "temperature": 0,
+        "response_format": format_model,
+    }
+
+    if "api.openai.com" not in settings.openai_url:
+        generation_kwargs["extra_body"] = {
+            "enable_thinking": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+
     return OpenAIChatGenerator(
         api_base_url=settings.openai_url,
         api_key=Secret.from_token(settings.openai_token),
         model=settings.openai_model,
         timeout=settings.openai_timeout,
-        generation_kwargs={
-            "temperature": 0,
-            "response_format": format_model,
-            "extra_body": {
-                "enable_thinking": False,
-                "chat_template_kwargs": {"enable_thinking": False},
-            },
-        },
+        generation_kwargs=generation_kwargs,
     )
 
 
@@ -110,11 +115,13 @@ def build_chunker() -> DoclingHybridChunker:
 
 _CHUNK_ENRICHER_PROMPT = """\
 You are a document metadata extraction assistant.
-The text below is one chunk excerpted from a larger document; it begins with its heading path.
+The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}"; the chunk begins with its heading path within that document.
 Analyze the chunk and extract structured metadata.
 Return only what is clearly indicated by the text.
 
-Use the heading path to situate the chunk (field context); extract every other field from the chunk content itself.
+Write the free-text fields (context, keywords, hypothetical_questions) in the same language as the chunk content — do not translate them to English.
+
+Use the document title and heading path to situate the chunk (field context); extract every other field from the chunk content itself.
 
 <file_content>{{ document.content }}</file_content>"""
 
