@@ -41,7 +41,7 @@ async def _rerank_snippets(
         result = await reranker.run_async(query=query, documents=sentences)
         ranked_sentences = result["documents"]
     except Exception as error:
-        logger.warning(f"snippet reranking failed, falling back to lexical: {error}")
+        logger.warning(f"snippet reranking failed, falling back to chunk context/prefix: {error}")
         return {}
 
     best_snippets: dict[str, list[Document]] = {}

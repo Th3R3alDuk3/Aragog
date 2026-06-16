@@ -52,7 +52,7 @@ async def _retrieve(
     top_k_before: int,
     top_k_after: int,
 ) -> list[Document]:
-    
+
     inputs = {
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},

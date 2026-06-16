@@ -58,7 +58,7 @@ uv run python index.py path/to/doc1.pdf path/to/doc2.pdf
 uv run python server.py
 ```
 
-The MCP server listens on `http://HOST:PORT` (default `0.0.0.0:8000`, streamable-http). Point OpenWebUI's MCP integration at it; the five tools become available to the agent.
+The MCP server listens on `http://HOST:PORT` (default `0.0.0.0:8000`, streamable-http). Point OpenWebUI's MCP integration at it; the seven tools become available to the agent.
 
 > **First run:** the chunker tokenizer (HF) and the sparse BM25 model (FastEmbed) download into `./data` on first use — set `HF_HUB_OFFLINE=0`, then switch back to `1` for offline startups. Dense embeddings and reranking are served by external OpenAI-/`/rerank`-compatible endpoints (configure their URLs in `.env`).
 
@@ -120,8 +120,9 @@ All settings live in `.env` (see `.env.example`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENRICHER_MAX_WORKERS` | 3 | Parallel LLM metadata extractions |
-| `OPENAI_URL` | http://localhost:11434/v1 | OpenAI-compatible endpoint (enrichment) |
-| `OPENAI_MODEL` | gemma4:e4b | Enrichment model |
+| `ENRICHER_MODEL` | gemma4:e4b | Enrichment model |
+| `ENRICHER_URL` | http://localhost:11434/v1 | OpenAI-compatible endpoint (enrichment) |
+| `ENRICHER_TIMEOUT` | 300 | Enrichment request timeout (s) |
 
 ### 🔮 Embedders (Dense + Sparse)
 | Variable | Default | Description |

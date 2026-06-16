@@ -32,17 +32,17 @@ def _build_structured_generator(format_model) -> OpenAIChatGenerator:
         "response_format": format_model,
     }
 
-    if "api.openai.com" not in settings.openai_url:
+    if "api.openai.com" not in settings.enricher_url:
         generation_kwargs["extra_body"] = {
             "enable_thinking": False,
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
     return OpenAIChatGenerator(
-        api_base_url=settings.openai_url,
-        api_key=Secret.from_token(settings.openai_token),
-        model=settings.openai_model,
-        timeout=settings.openai_timeout,
+        api_base_url=settings.enricher_url,
+        api_key=Secret.from_token(settings.enricher_token),
+        model=settings.enricher_model,
+        timeout=settings.enricher_timeout,
         generation_kwargs=generation_kwargs,
     )
 

@@ -34,10 +34,10 @@ class Settings(BaseSettings):
     chunker_max_tokens: int
     # Enricher
     enricher_max_workers: int
-    openai_url: str
-    openai_token: str
-    openai_model: str
-    openai_timeout: int
+    enricher_model: str
+    enricher_url: str
+    enricher_token: str
+    enricher_timeout: int
     # Embedders (Dense + Sparse)
     dense_embedding_model: str
     dense_embedding_url: str
