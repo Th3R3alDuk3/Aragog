@@ -55,7 +55,7 @@ docker compose --profile docling up -d
 uv run python index.py path/to/doc1.pdf path/to/doc2.pdf
 
 # Run the MCP server
-uv run python main.py
+uv run python server.py
 ```
 
 The MCP server listens on `http://HOST:PORT` (default `0.0.0.0:8000`, streamable-http). Point OpenWebUI's MCP integration at it; the five tools become available to the agent.
@@ -68,7 +68,7 @@ The MCP server listens on `http://HOST:PORT` (default `0.0.0.0:8000`, streamable
 
 ```
 index.py  →  MinIO + Docling HybridChunker → enrich → dense+sparse embed → Qdrant
-main.py   →  FastMCP tools → (dense|sparse) retrieve → cross-encoder rerank → snippets
+server.py →  FastMCP tools → (dense|sparse) retrieve → cross-encoder rerank → snippets
 OpenWebUI →  agent: search → read → reason → answer (cites chunk ids)
 ```
 

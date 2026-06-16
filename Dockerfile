@@ -26,14 +26,15 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder /app/.venv .venv
-COPY main.py index.py config.py ./
+COPY server.py index.py config.py ./
 COPY components ./components
 COPY models ./models
 COPY pipelines ./pipelines
 COPY services ./services
+COPY tools ./tools
 
 ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["python3", "main.py"]
+CMD ["python3", "server.py"]

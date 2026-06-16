@@ -29,9 +29,9 @@ class SearchHit(BaseModel):
     )
     snippet: str = Field(
         description=(
-            "Concise summary of the chunk — its context within the document "
-            "and its key point — for quick triage; read the full chunk with "
-            "`read_chunk`."
+            "The sentence(s) from the chunk that best match the query — shows "
+            "why this chunk was retrieved, for quick triage. Not the full text; "
+            "open the chunk with `read_chunk` before answering."
         ),
     )
 
