@@ -30,9 +30,9 @@ A-RAG-OG indexes documents into a single hybrid (dense + sparse) Qdrant store an
 
 | Tool | Purpose |
 |------|---------|
-| `hybrid_search(query, top_k_before, top_k_after)` | **Default** — dense + sparse, fused by reranker |
-| `dense_search(query, top_k_before, top_k_after)` | Dense retrieval (by meaning) + rerank |
-| `sparse_search(query, top_k_before, top_k_after)` | Sparse/BM25 retrieval (exact terms) + rerank |
+| `keyword_and_semantic_search(query, top_k_before, top_k_after)` | **Default** — dense + sparse, fused by reranker |
+| `semantic_search(query, top_k_before, top_k_after)` | Dense retrieval (by meaning) + rerank |
+| `keyword_search(query, top_k_before, top_k_after)` | Sparse/BM25 retrieval (exact terms) + rerank |
 | `filtered_search(query, keywords, entities, content_types, date_from, date_to, …)` | Dense + metadata filter + rerank |
 | `find_related(chunk_ids, query, …)` | Associative multi-hop — more chunks sharing the hits' entities |
 | `read_chunk(chunk_ids)` | Full content of chunks by id |
