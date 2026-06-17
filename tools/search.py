@@ -53,6 +53,7 @@ async def keyword_and_semantic_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
+
     result = await hybrid_pipeline.run_async({
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
@@ -101,6 +102,7 @@ async def semantic_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
+
     result = await dense_pipeline.run_async({
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
@@ -153,6 +155,7 @@ async def keyword_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     sparse_pipeline = ctx.lifespan_context["sparse_pipeline"]
+
     result = await sparse_pipeline.run_async({
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
@@ -241,6 +244,7 @@ async def filtered_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
+
     conditions: list[dict] = []
 
     if keywords:
@@ -353,6 +357,7 @@ async def find_related(
     document_store = ctx.lifespan_context["document_store"]
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
+
     seeds = await document_store.filter_documents_async(
         filters={"field": "id", "operator": "in", "value": chunk_ids})
 
