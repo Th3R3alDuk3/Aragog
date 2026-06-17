@@ -49,8 +49,6 @@ async def keyword_and_semantic_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
-    snippet_reranker = ctx.lifespan_context["snippet_reranker"]
-
     result = await hybrid_pipeline.run_async({
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
@@ -61,8 +59,7 @@ async def keyword_and_semantic_search(
 
     documents = result["reranker"]["documents"]
 
-    return await search_response(
-        documents, minio_store, query, snippet_reranker)
+    return search_response(documents, minio_store)
 
 
 @tool(
@@ -96,8 +93,6 @@ async def semantic_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
-    snippet_reranker = ctx.lifespan_context["snippet_reranker"]
-
     result = await dense_pipeline.run_async({
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
@@ -106,8 +101,7 @@ async def semantic_search(
 
     documents = result["reranker"]["documents"]
 
-    return await search_response(
-        documents, minio_store, query, snippet_reranker)
+    return search_response(documents, minio_store)
 
 
 @tool(
@@ -147,8 +141,6 @@ async def keyword_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     sparse_pipeline = ctx.lifespan_context["sparse_pipeline"]
-    snippet_reranker = ctx.lifespan_context["snippet_reranker"]
-
     result = await sparse_pipeline.run_async({
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
@@ -157,8 +149,7 @@ async def keyword_search(
 
     documents = result["reranker"]["documents"]
 
-    return await search_response(
-        documents, minio_store, query, snippet_reranker)
+    return search_response(documents, minio_store)
 
 
 @tool(
@@ -234,8 +225,6 @@ async def filtered_search(
 
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
-    snippet_reranker = ctx.lifespan_context["snippet_reranker"]
-
     conditions: list[dict] = []
 
     if keywords:
@@ -302,8 +291,7 @@ async def filtered_search(
 
     documents = result["reranker"]["documents"]
 
-    return await search_response(
-        documents, minio_store, query, snippet_reranker)
+    return search_response(documents, minio_store)
 
 
 @tool(
@@ -345,8 +333,6 @@ async def find_related(
     document_store = ctx.lifespan_context["document_store"]
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
-    snippet_reranker = ctx.lifespan_context["snippet_reranker"]
-
     seeds = await document_store.filter_documents_async(
         filters={"field": "id", "operator": "in", "value": chunk_ids})
 
@@ -358,8 +344,7 @@ async def find_related(
     })
 
     if not entities:
-        return await search_response(
-            [], minio_store, query, snippet_reranker)
+        return search_response([], minio_store)
 
     result = await dense_pipeline.run_async({
         "embedder": {"text": query},
@@ -381,5 +366,4 @@ async def find_related(
 
     documents = result["reranker"]["documents"]
 
-    return await search_response(
-        documents, minio_store, query, snippet_reranker)
+    return search_response(documents, minio_store)

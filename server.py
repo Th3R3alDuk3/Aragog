@@ -9,7 +9,7 @@ from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.utilities.logging import configure_logging
 
 from config import get_settings
-from pipelines._factories import build_document_store, build_reranker
+from pipelines._factories import build_document_store
 from pipelines.retrieval import (
     build_dense_retrieval_pipeline,
     build_sparse_retrieval_pipeline,
@@ -40,9 +40,6 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     document_store = build_document_store()
 
-    snippet_reranker = build_reranker()
-    snippet_reranker.warm_up()
-
     yield {
         "document_store": document_store,
         "minio_store": MinioStore(
@@ -54,7 +51,6 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
         "dense_pipeline": build_dense_retrieval_pipeline(document_store),
         "sparse_pipeline": build_sparse_retrieval_pipeline(document_store),
         "hybrid_pipeline": build_hybrid_retrieval_pipeline(document_store),
-        "snippet_reranker": snippet_reranker,
     }
 
 
