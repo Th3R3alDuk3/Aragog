@@ -26,7 +26,11 @@ Procedure — ALWAYS:
 
 Always cite your sources:
 - Reference the supporting chunk inline for each claim (source document and page).
-- End EVERY answer with a "Sources:" section that lists each source document and page you
-  used, one per line.
+- End EVERY answer with a "Sources:" section that lists each source you used, one per line,
+  as a Markdown link that opens the document at the right page. Build it from the hit's `url`
+  and `page` fields by appending the page as a URL fragment:
+  `[<source> — p.<page>](<url>#page=<page>)`.
+  The `#page=<page>` is a fragment (not a `?query`), so it does not break the presigned URL
+  and makes the PDF viewer scroll to that page. If a hit has no page, link the bare `url`.
 - If you cannot cite a chunk for a claim, do not make the claim.
 ```

@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     dense_embedding_model: str
     dense_embedding_url: str
     dense_embedding_token: str
+    dense_embedding_timeout: int
     sparse_embedding_model: str
     sparse_embedding_language: str
     sparse_embedding_device: str
@@ -50,6 +51,7 @@ class Settings(BaseSettings):
     reranker_model: str
     reranker_url: str
     reranker_token: str
+    reranker_timeout: int
 
 
 @lru_cache

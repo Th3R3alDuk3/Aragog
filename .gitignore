@@ -1,7 +1,12 @@
 .env
-.venv
-docs
-data
-tests
-__pycache__
+
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+data/
+docs/
+tests/
+
 BACKLOG.md

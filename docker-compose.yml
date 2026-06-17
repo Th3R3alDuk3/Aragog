@@ -1,10 +1,18 @@
+name: aragog
+
+volumes:
+  minio_data:
+    driver: local
+  qdrant_data:
+    driver: local
+
 services:
 
-  app:
+  server:
     profiles:
-      - app
+      - server
     build: .
-    container_name: hybridrag
+    container_name: server
     restart: unless-stopped
     network_mode: host
     env_file: .env
@@ -19,8 +27,8 @@ services:
     container_name: minio
     restart: unless-stopped
     ports:
-      - "9000:9000" # S3 API
-      - "9001:9001" # Web UI
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
     environment:
@@ -33,8 +41,8 @@ services:
     container_name: qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333" # HTTP/REST + Web UI
-      - "6334:6334" # gRPC (faster for bulk writes)
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
@@ -52,41 +60,65 @@ services:
     container_name: docling
     restart: unless-stopped
     ports:
-      - "5001:5001"
+      - "127.0.0.1:5001:5001"
     environment:
       - DOCLING_SERVE_ENABLE_UI=True
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_TIMEOUT}
 
-  reranker:
+  embedder:
     profiles:
-      - vllm
+      - embedder
     image: vllm/vllm-openai:latest
-    container_name: vllm
+    container_name: embedder
     restart: unless-stopped
     ipc: host
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - ./data/huggingface:/root/.cache/huggingface
     command: >
-      ${RERANKER_MODEL}
-      --served-model-name=${RERANKER_MODEL}
+      ${DENSE_EMBEDDING_MODEL}
+      --served-model-name=${DENSE_EMBEDDING_MODEL}
+      --api-key=${DENSE_EMBEDDING_TOKEN}
       --runner=pooling
-      --gpu-memory-utilization=0.20
-      --max-model-len=4096
+      --convert=embed
+      --gpu-memory-utilization=0.15
+      --max-model-len=1024
+      --max-num-seqs=256
       --enforce-eager
-      --host=0.0.0.0
-      --port=8000
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["0"]
               capabilities: [gpu]
 
-volumes:
-  minio_data:
-    driver: local
-  qdrant_data:
-    driver: local
+  reranker:
+    profiles:
+      - reranker
+    image: vllm/vllm-openai:latest
+    container_name: reranker
+    restart: unless-stopped
+    ipc: host
+    ports:
+      - "127.0.0.1:8002:8000"
+    volumes:
+      - ./data/huggingface:/root/.cache/huggingface
+    command: >
+      ${RERANKER_MODEL}
+      --served-model-name=${RERANKER_MODEL}
+      --api-key=${RERANKER_TOKEN}
+      --runner=pooling
+      --convert=classify
+      --gpu-memory-utilization=0.20
+      --max-model-len=4096
+      --max-num-seqs=256
+      --enforce-eager
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]

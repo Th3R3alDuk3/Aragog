@@ -115,13 +115,16 @@ def build_chunker() -> DoclingHybridChunker:
 
 _CHUNK_ENRICHER_PROMPT = """\
 You are a document metadata extraction assistant.
-The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}"; the chunk begins with its heading path within that document.
+The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}"; 
+the chunk begins with its heading path within that document.
 Analyze the chunk and extract structured metadata.
 Return only what is clearly indicated by the text.
 
-Write the free-text fields (context, keywords, hypothetical_questions) in the same language as the chunk content — do not translate them to English.
+Write the free-text fields (context, keywords, hypothetical_questions) in the same language as the chunk content 
+— do not translate them to English.
 
-Use the document title and heading path to situate the chunk (field context); extract every other field from the chunk content itself.
+Use the document title and heading path to situate the chunk (field context); 
+extract every other field from the chunk content itself.
 
 <file_content>{{ document.content }}</file_content>"""
 
@@ -145,6 +148,7 @@ def build_dense_document_embedder() -> OpenAIDocumentEmbedder:
         api_key=Secret.from_token(settings.dense_embedding_token),
         model=settings.dense_embedding_model,
         meta_fields_to_embed=settings.embedded_meta_fields.split(","),
+        timeout=settings.dense_embedding_timeout,
     )
 
 
@@ -153,6 +157,7 @@ def build_dense_text_embedder() -> OpenAITextEmbedder:
         api_base_url=settings.dense_embedding_url,
         api_key=Secret.from_token(settings.dense_embedding_token),
         model=settings.dense_embedding_model,
+        timeout=settings.dense_embedding_timeout,
     )
 
 
@@ -208,4 +213,7 @@ def build_reranker() -> VLLMRanker:
         api_base_url=settings.reranker_url,
         api_key=Secret.from_token(settings.reranker_token),
         model=settings.reranker_model,
+        http_client_kwargs={
+            "timeout": settings.reranker_timeout
+        },
     )
