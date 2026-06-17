@@ -5,8 +5,12 @@ from fastmcp.tools import tool
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from config import get_settings
 from models.results import SearchResult
 from tools._helpers import search_response
+
+
+settings = get_settings()
 
 
 _ENTITY_FIELDS = (
@@ -54,7 +58,11 @@ async def keyword_and_semantic_search(
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": top_k_before},
         "sparse_retriever": {"top_k": top_k_before},
-        "reranker": {"query": query, "top_k": top_k_after},
+        "reranker": {
+            "query": query,
+            "top_k": top_k_after,
+            "score_threshold": settings.reranker_score_threshold,
+        },
     })
 
     documents = result["reranker"]["documents"]
@@ -96,7 +104,11 @@ async def semantic_search(
     result = await dense_pipeline.run_async({
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
-        "reranker": {"query": query, "top_k": top_k_after},
+        "reranker": {
+            "query": query,
+            "top_k": top_k_after,
+            "score_threshold": settings.reranker_score_threshold,
+        },
     })
 
     documents = result["reranker"]["documents"]
@@ -144,7 +156,11 @@ async def keyword_search(
     result = await sparse_pipeline.run_async({
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
-        "reranker": {"query": query, "top_k": top_k_after},
+        "reranker": {
+            "query": query,
+            "top_k": top_k_after,
+            "score_threshold": settings.reranker_score_threshold,
+        },
     })
 
     documents = result["reranker"]["documents"]
@@ -286,7 +302,11 @@ async def filtered_search(
                 "conditions": conditions
             } if conditions else None,
         },
-        "reranker": {"query": query, "top_k": top_k_after},
+        "reranker": {
+            "query": query,
+            "top_k": top_k_after,
+            "score_threshold": settings.reranker_score_threshold,
+        },
     })
 
     documents = result["reranker"]["documents"]
@@ -361,7 +381,11 @@ async def find_related(
                 ],
             },
         },
-        "reranker": {"query": query, "top_k": top_k_after},
+        "reranker": {
+            "query": query,
+            "top_k": top_k_after,
+            "score_threshold": settings.reranker_score_threshold,
+        },
     })
 
     documents = result["reranker"]["documents"]

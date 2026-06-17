@@ -139,6 +139,7 @@ All settings live in `.env` (see `.env.example`).
 |----------|---------|-------------|
 | `RERANKER_MODEL` | BAAI/bge-reranker-v2-m3 | Reranker model id on the rerank server |
 | `RERANKER_URL` | http://localhost:8001/v1 | vLLM base URL (VLLMRanker calls its `/rerank`) |
+| `RERANKER_SCORE_THRESHOLD` | 0.2 | Minimum rerank score (0–1) for a hit to be returned; lower-scoring hits are dropped |
 
 ---
 

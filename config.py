@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     reranker_url: str
     reranker_token: str
     reranker_timeout: int
+    reranker_score_threshold: float
 
 
 @lru_cache
