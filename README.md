@@ -2,7 +2,7 @@
   <img src="logo.png" alt="A-RAG-OG" width="220">
 </p>
 
-<h1 align="center">🧬 A-RAG-OG</h1>
+<h1 align="center">A-RAG-OG</h1>
 
 <p align="center">
   <b>Agentic RAG, Off Grid</b> — a self-hosted hybrid-RAG <b>MCP server</b> for OpenWebUI:<br>
