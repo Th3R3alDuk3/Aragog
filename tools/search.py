@@ -174,8 +174,9 @@ async def keyword_search(
 @tool(
     name="filtered_search",
     description=(
-        "Search the knowledge base by meaning, restricted by metadata "
-        "filters — use to constrain results by keywords, entities, content "
+        "Search the knowledge base with combined semantic and keyword "
+        "retrieval, restricted by metadata filters — use to constrain "
+        "results by keywords, entities, content "
         "types or a date range. Combine any of the filters; all given must "
         "hold. Returns the top reranked chunks with id, source, page, "
         "headings, a short snippet and a temporary source URL."
@@ -243,7 +244,7 @@ async def filtered_search(
 ) -> SearchResult:
 
     minio_store = ctx.lifespan_context["minio_store"]
-    dense_pipeline = ctx.lifespan_context["dense_pipeline"]
+    hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
 
     conditions: list[dict] = []
 
@@ -297,15 +298,16 @@ async def filtered_search(
             "value": created_to if "T" in created_to else f"{created_to}T23:59:59"
         })
 
-    result = await dense_pipeline.run_async({
-        "embedder": {"text": query},
-        "retriever": {
-            "top_k": top_k_before,
-            "filters": {
-                "operator": "AND",
-                "conditions": conditions
-            } if conditions else None,
-        },
+    filters = {
+        "operator": "AND",
+        "conditions": conditions,
+    } if conditions else None
+
+    result = await hybrid_pipeline.run_async({
+        "dense_embedder": {"text": query},
+        "sparse_embedder": {"text": query},
+        "dense_retriever": {"top_k": top_k_before, "filters": filters},
+        "sparse_retriever": {"top_k": top_k_before, "filters": filters},
         "reranker": {
             "query": query,
             "top_k": top_k_after,
