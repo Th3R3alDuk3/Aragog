@@ -120,8 +120,8 @@ the chunk begins with its heading path within that document.
 Analyze the chunk and extract structured metadata.
 Return only what is clearly indicated by the text.
 
-Write ALL output fields (context, keywords, hypothetical_questions) in English, regardless of the
-chunk's language — translate where the source text is not English. Keeping the metadata in one
+Write ALL output fields (context, keywords, hypothetical_questions) in <<LANGUAGE>>, regardless of the
+chunk's language — translate where the source text is not <<LANGUAGE>>. Keeping the metadata in one
 consistent language makes keyword (BM25) search reliable.
 
 Use the document title and heading path to situate the chunk (field context); 
@@ -132,7 +132,7 @@ extract every other field from the chunk content itself.
 
 def build_chunk_enricher() -> LLMMetadataExtractor:
     return LLMMetadataExtractor(
-        prompt=_CHUNK_ENRICHER_PROMPT,
+        prompt=_CHUNK_ENRICHER_PROMPT.replace("<<LANGUAGE>>", settings.enricher_language),
         chat_generator=_build_structured_generator(Meta),
         max_workers=settings.enricher_max_workers,
     )
