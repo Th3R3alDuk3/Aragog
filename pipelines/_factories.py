@@ -120,8 +120,9 @@ the chunk begins with its heading path within that document.
 Analyze the chunk and extract structured metadata.
 Return only what is clearly indicated by the text.
 
-Write the free-text fields (context, keywords, hypothetical_questions) in the same language as the chunk content 
-— do not translate them to English.
+Write ALL output fields (context, keywords, hypothetical_questions) in English, regardless of the
+chunk's language — translate where the source text is not English. Keeping the metadata in one
+consistent language makes keyword (BM25) search reliable.
 
 Use the document title and heading path to situate the chunk (field context); 
 extract every other field from the chunk content itself.
@@ -164,11 +165,11 @@ def build_dense_text_embedder() -> OpenAITextEmbedder:
 def build_sparse_document_embedder() -> FastembedSparseDocumentEmbedder:
     return FastembedSparseDocumentEmbedder(
         model=settings.sparse_embedding_model,
+        meta_fields_to_embed=settings.embedded_meta_fields.split(","),
         model_kwargs={
             "language": settings.sparse_embedding_language,
             "cuda": settings.sparse_embedding_device.startswith("cuda"),
         },
-        meta_fields_to_embed=settings.embedded_meta_fields.split(","),
     )
 
 
