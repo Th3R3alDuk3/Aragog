@@ -1,12 +1,11 @@
-from argparse import ArgumentParser
-
 from dotenv import load_dotenv
 load_dotenv()
 
-from asyncio import run
-from json import loads
-from logging import INFO, basicConfig, getLogger
+from argparse import ArgumentParser
+from asyncio import Semaphore, gather, run
+from json import dumps, loads
 from pathlib import Path
+from random import Random
 
 from haystack import AsyncPipeline, Document
 from haystack.components.evaluators import (
@@ -15,7 +14,11 @@ from haystack.components.evaluators import (
     DocumentRecallEvaluator,
 )
 from haystack.components.evaluators.document_recall import RecallMode
+from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack.dataclasses import ChatMessage
+from haystack.utils import Secret
 
+from config import get_settings
 from pipelines._factories import build_document_store
 from pipelines.retrieval import (
     build_dense_retrieval_pipeline,
@@ -24,14 +27,14 @@ from pipelines.retrieval import (
 )
 
 
-basicConfig(level=INFO)
-logger = getLogger(__name__)
-
-
 #--------------------------------------------
 # GLOBALS
 #--------------------------------------------
 
+
+settings = get_settings()
+
+document_store = build_document_store()
 
 BUILDERS = {
     "dense": build_dense_retrieval_pipeline,
@@ -41,17 +44,76 @@ BUILDERS = {
 
 
 #--------------------------------------------
-# HELPERS
+# GOLDEN SET
 #--------------------------------------------
 
 
-async def _retrieve(
-    pipeline: AsyncPipeline,
-    mode: str,
-    query: str,
-    top_k_before: int,
-    top_k_after: int,
-) -> list[Document]:
+def build_question_generator() -> OpenAIChatGenerator:
+    return OpenAIChatGenerator(
+        api_base_url=settings.enricher_url,
+        api_key=Secret.from_token(settings.enricher_token),
+        model=settings.enricher_model,
+        timeout=settings.enricher_timeout,
+        generation_kwargs={"temperature": 0},
+    )
+
+
+async def generate_question(content: str, generator: OpenAIChatGenerator,
+        semaphore: Semaphore) -> str:
+
+    prompt = (
+        f"Below is an excerpt from a document. Write ONE specific question in "
+        f"{settings.enricher_language} that is answerable solely from this excerpt — "
+        f"the kind of question a real user would ask. Output only the question.\n\n"
+        f"<excerpt>\n{content}\n</excerpt>"
+    )
+
+    async with semaphore:
+        result = await generator.run_async(messages=[ChatMessage.from_user(prompt)])
+
+    return result["replies"][0].text.strip()
+
+
+async def generate(output: Path, num_questions: int, seed: int,
+        min_chars: int, concurrency: int) -> None:
+
+    documents = await document_store.filter_documents_async()
+    documents = [
+        doc for doc in documents
+        if doc.content and len(doc.content.strip()) >= min_chars
+    ]
+
+    if not documents:
+        print("No usable chunks in the index — index some documents first.")
+        return
+
+    Random(seed).shuffle(documents)
+    sample = documents[:num_questions]
+
+    generator = build_question_generator()
+    semaphore = Semaphore(concurrency)
+    questions = await gather(*[
+        generate_question(doc.content, generator, semaphore) for doc in sample
+    ])
+
+    golden = [
+        {"query": question, "relevant_chunk_ids": [doc.id]}
+        for question, doc in zip(questions, sample)
+        if question
+    ]
+
+    output.write_text(dumps(golden, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Wrote {len(golden)} query/chunk pairs to {output} "
+        f"(language: {settings.enricher_language})")
+
+
+#--------------------------------------------
+# EVALUATION
+#--------------------------------------------
+
+
+async def retrieve(pipeline: AsyncPipeline, mode: str, query: str,
+        top_k_before: int, top_k_after: int) -> list[Document]:
 
     inputs = {
         "embedder": {"text": query},
@@ -72,10 +134,8 @@ async def _retrieve(
     return result["reranker"]["documents"]
 
 
-def _score(
-    ground_truth: list[list[Document]],
-    retrieved: list[list[Document]],
-) -> dict[str, float]:
+def score(ground_truth: list[list[Document]],
+        retrieved: list[list[Document]]) -> dict[str, float]:
 
     evaluators = {
         "recall@k (single)": DocumentRecallEvaluator(mode=RecallMode.SINGLE_HIT, document_comparison_field="id"),
@@ -90,11 +150,8 @@ def _score(
     }
 
 
-def _report(
-    metrics_by_mode: dict[str, dict[str, float]],
-    n_queries: int,
-    top_k_after: int,
-) -> None:
+def report(metrics_by_mode: dict[str, dict[str, float]],
+        n_queries: int, top_k_after: int) -> None:
 
     metrics = list(next(iter(metrics_by_mode.values())))
     header = f"{'mode':10}" + "".join(f"{metric:>20}" for metric in metrics)
@@ -107,17 +164,8 @@ def _report(
     print()
 
 
-#--------------------------------------------
-# EVALUATION
-#--------------------------------------------
-
-
-async def evaluate(
-    golden_set_path: Path,
-    modes: list[str],
-    top_k_before: int,
-    top_k_after: int,
-) -> None:
+async def evaluate(golden_set_path: Path, modes: list[str],
+        top_k_before: int, top_k_after: int) -> None:
 
     golden = loads(golden_set_path.read_text(encoding="utf-8"))
     queries = [item["query"] for item in golden]
@@ -126,39 +174,62 @@ async def evaluate(
         for item in golden
     ]
 
-    document_store = build_document_store()
-
     metrics_by_mode: dict[str, dict[str, float]] = {}
 
     for mode in modes:
         pipeline = BUILDERS[mode](document_store)
         retrieved = [
-            await _retrieve(pipeline, mode, query, top_k_before, top_k_after)
+            await retrieve(pipeline, mode, query, top_k_before, top_k_after)
             for query in queries
         ]
-        metrics_by_mode[mode] = _score(ground_truth, retrieved)
-        logger.info(f"Evaluated {mode} over {len(queries)} queries")
+        metrics_by_mode[mode] = score(ground_truth, retrieved)
+        print(f"Evaluated {mode} over {len(queries)} queries")
 
-    _report(metrics_by_mode, len(queries), top_k_after)
+    report(metrics_by_mode, len(queries), top_k_after)
+
+
+#--------------------------------------------
+# CLI
+#--------------------------------------------
 
 
 async def main():
 
     parser = ArgumentParser(
-        description="Evaluate retrieval (Recall / MRR / MAP) against a golden set")
+        description="Generate a synthetic golden set, then evaluate retrieval against it")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    parser.add_argument("golden_set", nargs="?", type=Path, default=Path("eval-golden-set.json"),
-        help='JSON golden set: [{"query": ..., "relevant_chunk_ids": [...]}, ...]. Defaults to eval-golden-set.json')
-    parser.add_argument("--modes", nargs="+", choices=tuple(BUILDERS), default=list(BUILDERS),
-        help="Retrieval modes to evaluate. Defaults to all.")
-    parser.add_argument("--top-k-before", type=int, default=30,
-        help="Candidate chunks retrieved before reranking. Defaults to 30.")
-    parser.add_argument("--top-k-after", type=int, default=5,
-        help="Chunks kept after reranking (the k in recall@k). Defaults to 5.")
+    gen = subparsers.add_parser("generate",
+        help="Generate a synthetic golden set (query -> chunk) from the live index")
+    gen.add_argument("-o", "--output", type=Path, default=Path("eval-golden-set.json"),
+        help="Where to write the golden set")
+    gen.add_argument("-n", "--num-questions", type=int, default=50,
+        help="Number of chunks to sample into questions")
+    gen.add_argument("-s", "--seed", type=int, default=42,
+        help="Sampling seed for reproducibility")
+    gen.add_argument("--min-chars", type=int, default=100,
+        help="Skip chunks shorter than this many characters")
+    gen.add_argument("--concurrency", type=int, default=5,
+        help="Max concurrent LLM calls")
+
+    ev = subparsers.add_parser("run",
+        help="Evaluate retrieval (Recall / MRR / MAP) against a golden set")
+    ev.add_argument("golden_set", nargs="?", type=Path, default=Path("eval-golden-set.json"),
+        help="JSON golden set")
+    ev.add_argument("--modes", nargs="+", choices=tuple(BUILDERS), default=list(BUILDERS),
+        help="Retrieval modes to evaluate")
+    ev.add_argument("--top-k-before", type=int, default=30,
+        help="Candidate chunks retrieved before reranking")
+    ev.add_argument("--top-k-after", type=int, default=5,
+        help="Chunks kept after reranking (the k in recall@k)")
 
     args = parser.parse_args()
 
-    await evaluate(args.golden_set, args.modes, args.top_k_before, args.top_k_after)
+    if args.command == "generate":
+        await generate(args.output, args.num_questions, args.seed,
+            args.min_chars, args.concurrency)
+    else:
+        await evaluate(args.golden_set, args.modes, args.top_k_before, args.top_k_after)
 
 
 if __name__ == "__main__":
