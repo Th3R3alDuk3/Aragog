@@ -1,8 +1,7 @@
-from argparse import ArgumentParser
-
 from dotenv import load_dotenv
 load_dotenv()
 
+from argparse import ArgumentParser
 from asyncio import Semaphore, gather, run
 from datetime import datetime, timezone
 from itertools import batched
@@ -55,7 +54,7 @@ async def index(file_paths: list[Path], semaphore: Semaphore, idx: int, total: i
 
         chunks_written = result.get("writer", {}).get("documents_written", 0)
         print("+---------------------------------------------------------------")
-        print(f"| [{idx}/{total}] {len(file_paths)} file(s) -> {chunks_written} chunk(s)")
+        print(f"| [{idx}/{total}] {len(file_paths)} file(s) → {chunks_written} chunk(s)")
         print("+---------------------------------------------------------------")
 
 

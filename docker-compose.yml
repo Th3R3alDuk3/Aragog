@@ -82,8 +82,8 @@ services:
       --api-key=${DENSE_EMBEDDING_TOKEN}
       --runner=pooling
       --convert=embed
-      --gpu-memory-utilization=0.15
-      --max-model-len=1024
+      --gpu-memory-utilization=0.20
+      --max-model-len=8192
       --max-num-seqs=256
       --enforce-eager
     deploy:
@@ -112,7 +112,7 @@ services:
       --runner=pooling
       --convert=classify
       --gpu-memory-utilization=0.20
-      --max-model-len=4096
+      --max-model-len=8192
       --max-num-seqs=256
       --enforce-eager
     deploy:
