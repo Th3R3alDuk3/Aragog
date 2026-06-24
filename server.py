@@ -2,10 +2,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 from fastmcp.server.auth.providers.jwt import JWTVerifier
+from fastmcp.server.lifespan import lifespan as composable_lifespan
 from fastmcp.utilities.logging import configure_logging
 
 from config import get_settings
@@ -35,7 +35,7 @@ settings = get_settings()
 #--------------------------------------------
 
 
-@asynccontextmanager
+@composable_lifespan
 async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     document_store = build_document_store()
