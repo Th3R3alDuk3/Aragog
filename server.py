@@ -101,5 +101,5 @@ if __name__ == "__main__":
     mcp.run(
         host=settings.host,
         port=settings.port,
-        transport="streamable-http",
+        transport="http",
     )

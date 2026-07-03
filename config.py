@@ -1,4 +1,4 @@
-from functools import lru_cache
+from functools import cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -62,6 +62,6 @@ class Settings(BaseSettings):
     reranker_score_threshold: float
 
 
-@lru_cache
+@cache
 def get_settings() -> Settings:
     return Settings()
