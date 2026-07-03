@@ -22,7 +22,9 @@ class EnrichedMeta(BaseModel):
             "3-8 single words or short noun phrases (max 3 words each) "
             "capturing the most salient domain terms and named concepts as "
             "they appear in the text (e.g. ['Garantiezeit', 'Lieferdatum']), "
-            "excluding names already captured as entities. Never full "
+            "excluding names already captured as entities. For abbreviations "
+            "and acronyms include both the short and the expanded form "
+            "(e.g. ['AGB', 'Allgemeine Geschäftsbedingungen']). Never full "
             "sentences. Empty list if none stand out."
         ),
     )
@@ -47,28 +49,35 @@ class EnrichedMeta(BaseModel):
     ent_persons: list[str] = Field(
         default=[],
         description=(
-            "Full names of people explicitly mentioned in this chunk, as written "
-            "(e.g. ['Angela Merkel']). Empty list if none."
+            "People explicitly mentioned in this chunk. Always use the most "
+            "complete name the chunk provides, not short or inflected forms "
+            "(e.g. ['Angela Merkel'], not ['Merkel', 'Frau Merkel']), so the "
+            "same person gets the same string in every chunk. Empty list if none."
         ),
     )
     ent_organizations: list[str] = Field(
         default=[],
         description=(
-            "Organizations mentioned in this chunk — companies, agencies, institutions "
-            "(e.g. ['Siemens AG', 'European Commission']). Empty list if none."
+            "Organizations mentioned in this chunk — companies, agencies, institutions. "
+            "Always use the most complete name the chunk provides "
+            "(e.g. ['Siemens AG'], not ['Siemens']), so the same organization "
+            "gets the same string in every chunk. Empty list if none."
         ),
     )
     ent_products: list[str] = Field(
         default=[],
         description=(
-            "Products, software or brands mentioned in this chunk "
-            "(e.g. ['Windows 11', 'iPhone']). Empty list if none."
+            "Products, software or brands mentioned in this chunk. Always use "
+            "the most complete name the chunk provides, including version or "
+            "model where given (e.g. ['Windows 11'], not ['Windows']), so the "
+            "same product gets the same string in every chunk. Empty list if none."
         ),
     )
     ent_locations: list[str] = Field(
         default=[],
         description=(
-            "Geographic locations mentioned in this chunk — countries, cities, regions "
-            "(e.g. ['Berlin', 'Bayern']). Empty list if none."
+            "Geographic locations mentioned in this chunk — countries, cities, "
+            "regions. Use the base name, not inflected forms (e.g. ['Bayern'], "
+            "not ['Bayerns']). Empty list if none."
         ),
     )
