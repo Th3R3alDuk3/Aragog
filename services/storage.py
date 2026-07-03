@@ -1,5 +1,6 @@
 from asyncio import to_thread
 from datetime import timedelta
+from pathlib import Path
 
 from minio import Minio
 
@@ -11,7 +12,7 @@ class MinioStore:
         access_key: str,
         secret_key: str,
         bucket_name: str,
-    ):
+    ) -> None:
 
         self._client = Minio(
             endpoint=endpoint,
@@ -25,7 +26,10 @@ class MinioStore:
         if not self._client.bucket_exists(self._bucket_name):
             self._client.make_bucket(self._bucket_name)
 
-    async def upload(self, file_path: str, object_name: str):
+    async def upload(self,
+        file_path: Path | str,
+        object_name: str,
+    ) -> None:
         await to_thread(
             self._client.fput_object,
             bucket_name=self._bucket_name,
@@ -33,7 +37,10 @@ class MinioStore:
             file_path=file_path,
         )
 
-    def presigned_url(self, object_name: str, expires_seconds: int) -> str:
+    def presigned_url(self,
+        object_name: str,
+        expires_seconds: int,
+    ) -> str:
         return self._client.presigned_get_object(
             bucket_name=self._bucket_name,
             object_name=object_name,

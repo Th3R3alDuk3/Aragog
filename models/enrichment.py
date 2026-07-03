@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 
 
-class Meta(BaseModel):
+class EnrichedMeta(BaseModel):
     context: str = Field(
         default="",
         description=(

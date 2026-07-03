@@ -3,15 +3,17 @@ from haystack.components.joiners import DocumentJoiner
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from pipelines._factories import (
-    build_dense_text_embedder,
-    build_sparse_text_embedder,
     build_dense_embedding_retriever,
-    build_sparse_embedding_retriever,
+    build_dense_text_embedder,
     build_reranker,
+    build_sparse_embedding_retriever,
+    build_sparse_text_embedder,
 )
 
 
-def build_dense_retrieval_pipeline(document_store: QdrantDocumentStore) -> AsyncPipeline:
+def build_dense_retrieval_pipeline(
+    document_store: QdrantDocumentStore,
+) -> AsyncPipeline:
 
     pipeline = AsyncPipeline()
     pipeline.add_component("embedder",
@@ -27,7 +29,9 @@ def build_dense_retrieval_pipeline(document_store: QdrantDocumentStore) -> Async
     return pipeline
 
 
-def build_sparse_retrieval_pipeline(document_store: QdrantDocumentStore) -> AsyncPipeline:
+def build_sparse_retrieval_pipeline(
+    document_store: QdrantDocumentStore,
+) -> AsyncPipeline:
 
     pipeline = AsyncPipeline()
     pipeline.add_component("embedder",
@@ -43,7 +47,9 @@ def build_sparse_retrieval_pipeline(document_store: QdrantDocumentStore) -> Asyn
     return pipeline
 
 
-def build_hybrid_retrieval_pipeline(document_store: QdrantDocumentStore) -> AsyncPipeline:
+def build_hybrid_retrieval_pipeline(
+    document_store: QdrantDocumentStore,
+) -> AsyncPipeline:
 
     pipeline = AsyncPipeline()
     pipeline.add_component("dense_embedder",

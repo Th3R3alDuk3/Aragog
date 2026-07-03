@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     # Server
     host: str
     port: int
+    # Limits & Resilience
+    rate_limit_rps: float
+    rate_limit_burst: int
+    search_max_concurrency: int
+    search_timeout: int
     # Auth (OpenWebUI JWT)
     jwt_secret: str
     jwt_algorithm: str
@@ -24,6 +29,7 @@ class Settings(BaseSettings):
     # Document Store
     qdrant_url: str
     qdrant_token: str
+    qdrant_timeout: int
     qdrant_embedding_dim: int
     qdrant_collection: str
     # Converter

@@ -6,19 +6,31 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from config import get_settings
+from models.enrichment import EnrichedMeta
 from models.results import SearchResult
-from tools._helpers import search_response
-
+from tools._execution import run_search
+from tools._responses import search_response
 
 settings = get_settings()
 
 
-_ENTITY_FIELDS = (
-    "ent_persons",
-    "ent_organizations",
-    "ent_products",
-    "ent_locations",
+_ENTITY_FIELDS = tuple(
+    field for field in EnrichedMeta.model_fields
+    if field.startswith("ent_")
 )
+
+TopKBefore = Annotated[int, Field(
+    ge=20, le=60,
+    description=(
+        "Number of candidate chunks to retrieve (per retriever) before "
+        "reranking. Defaults to 30."
+    ),
+)]
+
+TopKAfter = Annotated[int, Field(
+    ge=3, le=10,
+    description="Number of chunks to return after reranking. Defaults to 5.",
+)]
 
 
 @tool(
@@ -38,23 +50,15 @@ async def keyword_and_semantic_search(
     query: Annotated[str, Field(
         description="A natural language query.",
     )],
-    top_k_before: Annotated[int, Field(
-        ge=20, le=60,
-        description=(
-            "Number of candidate chunks to retrieve from each of dense and "
-            "sparse before reranking. Defaults to 30."
-        ),
-    )] = 30,
-    top_k_after: Annotated[int, Field(
-        ge=3, le=10,
-        description="Number of chunks to return after reranking. Defaults to 5.",
-    )] = 5,
+    top_k_before: TopKBefore = 30,
+    top_k_after: TopKAfter = 5,
 ) -> SearchResult:
 
     minio_store = ctx.lifespan_context["minio_store"]
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
+    search_limiter = ctx.lifespan_context["search_limiter"]
 
-    result = await hybrid_pipeline.run_async({
+    documents = await run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": top_k_before},
@@ -64,9 +68,7 @@ async def keyword_and_semantic_search(
             "top_k": top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
-    })
-
-    documents = result["reranker"]["documents"]
+    }, search_limiter)
 
     return search_response(documents, minio_store)
 
@@ -87,23 +89,15 @@ async def semantic_search(
     query: Annotated[str, Field(
         description="A natural language query.",
     )],
-    top_k_before: Annotated[int, Field(
-        ge=20, le=60,
-        description=(
-            "Number of candidate chunks to retrieve before reranking. "
-            "Defaults to 30."
-        ),
-    )] = 30,
-    top_k_after: Annotated[int, Field(
-        ge=3, le=10,
-        description="Number of chunks to return after reranking. Defaults to 5.",
-    )] = 5,
+    top_k_before: TopKBefore = 30,
+    top_k_after: TopKAfter = 5,
 ) -> SearchResult:
 
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
+    search_limiter = ctx.lifespan_context["search_limiter"]
 
-    result = await dense_pipeline.run_async({
+    documents = await run_search(dense_pipeline, {
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
         "reranker": {
@@ -111,9 +105,7 @@ async def semantic_search(
             "top_k": top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
-    })
-
-    documents = result["reranker"]["documents"]
+    }, search_limiter)
 
     return search_response(documents, minio_store)
 
@@ -140,23 +132,15 @@ async def keyword_search(
             "'warranty period')."
         ),
     )],
-    top_k_before: Annotated[int, Field(
-        ge=20, le=60,
-        description=(
-            "Number of candidate chunks to retrieve before reranking. "
-            "Defaults to 30."
-        ),
-    )] = 30,
-    top_k_after: Annotated[int, Field(
-        ge=3, le=10,
-        description="Number of chunks to return after reranking. Defaults to 5.",
-    )] = 5,
+    top_k_before: TopKBefore = 30,
+    top_k_after: TopKAfter = 5,
 ) -> SearchResult:
 
     minio_store = ctx.lifespan_context["minio_store"]
     sparse_pipeline = ctx.lifespan_context["sparse_pipeline"]
+    search_limiter = ctx.lifespan_context["search_limiter"]
 
-    result = await sparse_pipeline.run_async({
+    documents = await run_search(sparse_pipeline, {
         "embedder": {"text": query},
         "retriever": {"top_k": top_k_before},
         "reranker": {
@@ -164,9 +148,7 @@ async def keyword_search(
             "top_k": top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
-    })
-
-    documents = result["reranker"]["documents"]
+    }, search_limiter)
 
     return search_response(documents, minio_store)
 
@@ -230,21 +212,13 @@ async def filtered_search(
             "inclusive of the whole day."
         ),
     )] = "",
-    top_k_before: Annotated[int, Field(
-        ge=20, le=60,
-        description=(
-            "Number of candidate chunks to retrieve before reranking. "
-            "Defaults to 30."
-        ),
-    )] = 30,
-    top_k_after: Annotated[int, Field(
-        ge=3, le=10,
-        description="Number of chunks to return after reranking. Defaults to 5.",
-    )] = 5,
+    top_k_before: TopKBefore = 30,
+    top_k_after: TopKAfter = 5,
 ) -> SearchResult:
 
     minio_store = ctx.lifespan_context["minio_store"]
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
+    search_limiter = ctx.lifespan_context["search_limiter"]
 
     conditions: list[dict] = []
 
@@ -259,8 +233,8 @@ async def filtered_search(
         conditions.append({
             "operator": "OR",
             "conditions": [{
-                "field": f"meta.{field}", "operator": "in", "value": entities
-            } for field in _ENTITY_FIELDS]
+                "field": f"meta.{field}", "operator": "in", "value": entities,
+            } for field in _ENTITY_FIELDS],
         })
 
     if content_types:
@@ -281,21 +255,21 @@ async def filtered_search(
         conditions.append({
             "field": "meta.dates",
             "operator": "<=",
-            "value": date_to
+            "value": date_to,
         })
 
     if created_from:
         conditions.append({
             "field": "meta.created_at",
             "operator": ">=",
-            "value": created_from
+            "value": created_from,
         })
 
     if created_to:
         conditions.append({
             "field": "meta.created_at",
             "operator": "<=",
-            "value": created_to if "T" in created_to else f"{created_to}T23:59:59"
+            "value": created_to if "T" in created_to else f"{created_to}T23:59:59",
         })
 
     filters = {
@@ -303,7 +277,7 @@ async def filtered_search(
         "conditions": conditions,
     } if conditions else None
 
-    result = await hybrid_pipeline.run_async({
+    documents = await run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": top_k_before, "filters": filters},
@@ -313,9 +287,7 @@ async def filtered_search(
             "top_k": top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
-    })
-
-    documents = result["reranker"]["documents"]
+    }, search_limiter)
 
     return search_response(documents, minio_store)
 
@@ -343,22 +315,14 @@ async def find_related(
     query: Annotated[str, Field(
         description="A natural language query the related chunks are ranked against.",
     )],
-    top_k_before: Annotated[int, Field(
-        ge=20, le=60,
-        description=(
-            "Number of candidate chunks to retrieve before reranking. "
-            "Defaults to 30."
-        ),
-    )] = 30,
-    top_k_after: Annotated[int, Field(
-        ge=3, le=10,
-        description="Number of chunks to return after reranking. Defaults to 5.",
-    )] = 5,
+    top_k_before: TopKBefore = 30,
+    top_k_after: TopKAfter = 5,
 ) -> SearchResult:
 
     document_store = ctx.lifespan_context["document_store"]
     minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
+    search_limiter = ctx.lifespan_context["search_limiter"]
 
     seeds = await document_store.filter_documents_async(
         filters={"field": "id", "operator": "in", "value": chunk_ids})
@@ -373,7 +337,7 @@ async def find_related(
     if not entities:
         return search_response([], minio_store)
 
-    result = await dense_pipeline.run_async({
+    documents = await run_search(dense_pipeline, {
         "embedder": {"text": query},
         "retriever": {
             "top_k": top_k_before,
@@ -393,8 +357,6 @@ async def find_related(
             "top_k": top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
-    })
-
-    documents = result["reranker"]["documents"]
+    }, search_limiter)
 
     return search_response(documents, minio_store)

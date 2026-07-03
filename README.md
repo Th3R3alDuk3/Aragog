@@ -18,7 +18,7 @@ A-RAG-OG indexes documents into a single hybrid (dense + sparse) Qdrant store an
 | Part | Description |
 |------|-------------|
 | 🧩 **HybridChunker** | Docling token- *and* structure-aware chunking, heading path prepended (contextual) |
-| 🏷️ **LLM Enrichment** | Per chunk: context, keywords, headings, entities, date |
+| 🏷️ **LLM Enrichment** | Per chunk: context, keywords, hypothetical questions, entities, dates |
 | 🔄 **Hybrid Retrieval** | Dense (bge-m3) + Sparse (BM25), one Qdrant store |
 | 📑 **Reranking** | bge-reranker-v2-m3 cross-encoder, `top_k` before/after per call |
 | 🔌 **MCP Server** | FastMCP (streamable-http) + OpenWebUI JWT auth |
@@ -78,11 +78,26 @@ OpenWebUI →  agent: search → read → reason → answer (cites chunk ids)
 
 All settings live in `.env` (see `.env.example`).
 
+### 📦 Model Caches
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HF_HUB_OFFLINE` | 0 | Set to `1` after the first run for offline startups |
+| `HF_HOME` | ./data/huggingface | HuggingFace cache (chunker tokenizer) |
+| `FASTEMBED_CACHE_PATH` | ./data/fastembed | FastEmbed cache (sparse BM25 model) |
+
 ### 🖥️ Server
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HOST` | 0.0.0.0 | MCP bind host |
 | `PORT` | 8000 | MCP port (streamable-http) |
+
+### 🚦 Limits & Resilience
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RATE_LIMIT_RPS` | 5 | Sustained MCP requests/s **per user** (token bucket keyed by the JWT identity) |
+| `RATE_LIMIT_BURST` | 15 | Per-user burst capacity of the token bucket |
+| `SEARCH_MAX_CONCURRENCY` | 16 | Search pipelines running at once (protects embedder/reranker; vLLM batches internally) |
+| `SEARCH_TIMEOUT` | 30 | End-to-end deadline (s) per search call, queue wait included; on failure the calling agent is told to retry |
 
 ### 🔐 Auth (OpenWebUI JWT)
 | Variable | Default | Description |
@@ -94,6 +109,7 @@ All settings live in `.env` (see `.env.example`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MINIO_ENDPOINT` | localhost:9000 | S3 endpoint |
+| `MINIO_USER` / `MINIO_PASSWORD` | – | S3 credentials (also used by the compose `minio` service) |
 | `MINIO_BUCKET` | default | Bucket for indexed files |
 | `MINIO_URL_EXPIRE` | 3600 | Lifetime (s) of presigned source URLs in search results |
 
@@ -101,6 +117,8 @@ All settings live in `.env` (see `.env.example`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `QDRANT_URL` | http://localhost:6333 | Qdrant URL |
+| `QDRANT_TOKEN` | – | Qdrant API key (also used by the compose `qdrant` service) |
+| `QDRANT_TIMEOUT` | 30 | Timeout (s) for Qdrant operations (search + reads) |
 | `QDRANT_EMBEDDING_DIM` | 1024 | Dense embedding dimension |
 | `QDRANT_COLLECTION` | aragog | Qdrant collection |
 
@@ -120,17 +138,21 @@ All settings live in `.env` (see `.env.example`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENRICHER_MAX_WORKERS` | 3 | Parallel LLM metadata extractions |
-| `ENRICHER_MODEL` | gemma4:e4b | Enrichment model |
+| `ENRICHER_MODEL` | gemma4:31b | Enrichment model |
 | `ENRICHER_URL` | http://localhost:11434/v1 | OpenAI-compatible endpoint (enrichment) |
+| `ENRICHER_TOKEN` | – | API key for the enrichment endpoint |
 | `ENRICHER_TIMEOUT` | 300 | Enrichment request timeout (s) |
+| `ENRICHER_LANGUAGE` | english | Language of the extracted metadata — must match `SPARSE_EMBEDDING_LANGUAGE` and the corpus for BM25 to work |
 
 ### 🔮 Embedders (Dense + Sparse)
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DENSE_EMBEDDING_MODEL` | bge-m3:567m | Dense model id on the embedding server (multilingual, 1024-dim) |
-| `DENSE_EMBEDDING_URL` | http://localhost:11434/v1 | OpenAI-compatible embeddings endpoint (Ollama by default; also vLLM/TEI/Infinity) |
+| `DENSE_EMBEDDING_MODEL` | BAAI/bge-m3 | Dense model id on the embedding server (multilingual, 1024-dim) |
+| `DENSE_EMBEDDING_URL` | http://localhost:8001/v1 | OpenAI-compatible embeddings endpoint (compose `embedder` profile; also Ollama/TEI/Infinity) |
+| `DENSE_EMBEDDING_TOKEN` | – | API key for the embeddings endpoint |
+| `DENSE_EMBEDDING_TIMEOUT` | 15 | Embedding request timeout (s) — kept below `SEARCH_TIMEOUT` so the SDK's transient retries still fit inside the deadline |
 | `SPARSE_EMBEDDING_MODEL` | Qdrant/bm25 | Sparse model (FastEmbed, runs locally) |
-| `SPARSE_EMBEDDING_LANGUAGE` | german | BM25 stop-word / stemming language |
+| `SPARSE_EMBEDDING_LANGUAGE` | english | BM25 stop-word / stemming language — must match the corpus and stay identical between indexing and querying |
 | `SPARSE_EMBEDDING_DEVICE` | cpu | Device for the sparse model (`cpu` or `cuda`) |
 | `EMBEDDED_META_FIELDS` | context,keywords,headings,hypothetical_questions | Meta fields embedded with content (dense + sparse) |
 
@@ -138,7 +160,9 @@ All settings live in `.env` (see `.env.example`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RERANKER_MODEL` | BAAI/bge-reranker-v2-m3 | Reranker model id on the rerank server |
-| `RERANKER_URL` | http://localhost:8001/v1 | vLLM base URL (VLLMRanker calls its `/rerank`) |
+| `RERANKER_URL` | http://localhost:8002/v1 | vLLM base URL (VLLMRanker calls its `/rerank`; compose `reranker` profile) |
+| `RERANKER_TOKEN` | – | API key for the rerank endpoint |
+| `RERANKER_TIMEOUT` | 15 | Rerank request timeout (s) — kept below `SEARCH_TIMEOUT` so a hung reranker surfaces as a specific error before the deadline |
 | `RERANKER_SCORE_THRESHOLD` | 0.2 | Minimum rerank score (0–1) for a hit to be returned; lower-scoring hits are dropped |
 
 ---
@@ -155,6 +179,9 @@ docker compose --profile docling up -d   # + Docling converter
 | Qdrant | 6333 | – | Vector database (REST + dashboard) |
 | MinIO | 9000 / 9001 | – | S3 API / console |
 | Docling | 5001 | `docling` | Document converter |
+| Embedder | 8001 | `embedder` | vLLM dense embedding server (GPU) |
+| Reranker | 8002 | `reranker` | vLLM rerank server (GPU) |
+| Server | 8000 | `server` | The MCP server itself, containerized |
 
 ---
 

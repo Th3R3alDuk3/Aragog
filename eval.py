@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from argparse import ArgumentParser
@@ -15,7 +16,6 @@ from haystack.components.evaluators import (
 )
 from haystack.components.evaluators.document_recall import RecallMode
 from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.dataclasses import ChatMessage
 from haystack.utils import Secret
 
 from config import get_settings
@@ -25,7 +25,6 @@ from pipelines.retrieval import (
     build_hybrid_retrieval_pipeline,
     build_sparse_retrieval_pipeline,
 )
-
 
 #--------------------------------------------
 # GLOBALS
@@ -58,8 +57,11 @@ def build_question_generator() -> OpenAIChatGenerator:
     )
 
 
-async def generate_question(content: str, generator: OpenAIChatGenerator,
-        semaphore: Semaphore) -> str:
+async def generate_question(
+    content: str,
+    generator: OpenAIChatGenerator,
+    semaphore: Semaphore,
+) -> str:
 
     prompt = (
         f"Below is an excerpt from a document. Write ONE specific question in "
@@ -69,13 +71,18 @@ async def generate_question(content: str, generator: OpenAIChatGenerator,
     )
 
     async with semaphore:
-        result = await generator.run_async(messages=[ChatMessage.from_user(prompt)])
+        result = await generator.run_async(messages=prompt)
 
     return result["replies"][0].text.strip()
 
 
-async def generate(output: Path, num_questions: int, seed: int,
-        min_chars: int, concurrency: int) -> None:
+async def generate(
+    output: Path,
+    num_questions: int,
+    seed: int,
+    min_chars: int,
+    concurrency: int,
+) -> None:
 
     documents = await document_store.filter_documents_async()
     documents = [
@@ -98,7 +105,7 @@ async def generate(output: Path, num_questions: int, seed: int,
 
     golden = [
         {"query": question, "relevant_chunk_ids": [doc.id]}
-        for question, doc in zip(questions, sample)
+        for question, doc in zip(questions, sample, strict=True)
         if question
     ]
 
@@ -112,8 +119,13 @@ async def generate(output: Path, num_questions: int, seed: int,
 #--------------------------------------------
 
 
-async def retrieve(pipeline: AsyncPipeline, mode: str, query: str,
-        top_k_before: int, top_k_after: int) -> list[Document]:
+async def retrieve(
+    pipeline: AsyncPipeline,
+    mode: str,
+    query: str,
+    top_k_before: int,
+    top_k_after: int,
+) -> list[Document]:
 
     inputs = {
         "embedder": {"text": query},
@@ -134,12 +146,16 @@ async def retrieve(pipeline: AsyncPipeline, mode: str, query: str,
     return result["reranker"]["documents"]
 
 
-def score(ground_truth: list[list[Document]],
-        retrieved: list[list[Document]]) -> dict[str, float]:
+def score(
+    ground_truth: list[list[Document]],
+    retrieved: list[list[Document]],
+) -> dict[str, float]:
 
     evaluators = {
-        "recall@k (single)": DocumentRecallEvaluator(mode=RecallMode.SINGLE_HIT, document_comparison_field="id"),
-        "recall@k (multi)": DocumentRecallEvaluator(mode=RecallMode.MULTI_HIT, document_comparison_field="id"),
+        "recall@k (single)": DocumentRecallEvaluator(
+            mode=RecallMode.SINGLE_HIT, document_comparison_field="id"),
+        "recall@k (multi)": DocumentRecallEvaluator(
+            mode=RecallMode.MULTI_HIT, document_comparison_field="id"),
         "mrr": DocumentMRREvaluator(document_comparison_field="id"),
         "map": DocumentMAPEvaluator(document_comparison_field="id"),
     }
@@ -150,8 +166,11 @@ def score(ground_truth: list[list[Document]],
     }
 
 
-def report(metrics_by_mode: dict[str, dict[str, float]],
-        n_queries: int, top_k_after: int) -> None:
+def report(
+    metrics_by_mode: dict[str, dict[str, float]],
+    n_queries: int,
+    top_k_after: int,
+) -> None:
 
     metrics = list(next(iter(metrics_by_mode.values())))
     header = f"{'mode':10}" + "".join(f"{metric:>20}" for metric in metrics)
@@ -164,8 +183,12 @@ def report(metrics_by_mode: dict[str, dict[str, float]],
     print()
 
 
-async def evaluate(golden_set_path: Path, modes: list[str],
-        top_k_before: int, top_k_after: int) -> None:
+async def evaluate(
+    golden_set_path: Path,
+    modes: list[str],
+    top_k_before: int,
+    top_k_after: int,
+) -> None:
 
     golden = loads(golden_set_path.read_text(encoding="utf-8"))
     queries = [item["query"] for item in golden]

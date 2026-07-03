@@ -1,16 +1,16 @@
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from argparse import ArgumentParser
 from asyncio import Semaphore, gather, run
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import batched
 from pathlib import Path
 
 from config import get_settings
 from pipelines.indexing import build_indexing_pipeline
 from services.storage import MinioStore
-
 
 #--------------------------------------------
 # GLOBALS
@@ -34,7 +34,12 @@ indexing_pipeline = build_indexing_pipeline()
 #--------------------------------------------
 
 
-async def index(file_paths: list[Path], semaphore: Semaphore, idx: int, total: int) -> None:
+async def index_batch(
+    file_paths: list[Path],
+    semaphore: Semaphore,
+    batch_num: int,
+    total_batches: int,
+) -> None:
 
     async with semaphore:
 
@@ -47,14 +52,14 @@ async def index(file_paths: list[Path], semaphore: Semaphore, idx: int, total: i
                 "meta": [{
                     "source": file_path.name,
                     "created_at": datetime.fromtimestamp(
-                        file_path.stat().st_mtime, tz=timezone.utc).isoformat(),
+                        file_path.stat().st_mtime, tz=UTC).isoformat(),
                 } for file_path in file_paths],
             },
         })
 
         chunks_written = result.get("writer", {}).get("documents_written", 0)
         print("+---------------------------------------------------------------")
-        print(f"| [{idx}/{total}] {len(file_paths)} file(s) → {chunks_written} chunk(s)")
+        print(f"| [{batch_num}/{total_batches}] {len(file_paths)} file(s) → {chunks_written} chunk(s)")
         print("+---------------------------------------------------------------")
 
 
@@ -73,11 +78,10 @@ async def main():
 
     semaphore = Semaphore(args.concurrency)
     batches = [list(batch) for batch in batched(args.file_paths, args.batch_size)]
-    total = len(batches)
 
     await gather(*[
-        index(batch, semaphore, idx, total)
-        for idx, batch in enumerate(batches, 1)
+        index_batch(batch, semaphore, batch_num, len(batches))
+        for batch_num, batch in enumerate(batches, 1)
     ])
 
 

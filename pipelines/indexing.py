@@ -3,11 +3,11 @@ from haystack.components.writers import DocumentWriter
 from haystack.document_stores.types import DuplicatePolicy
 
 from pipelines._factories import (
-    build_document_store,
-    build_converter,
-    build_chunker,
     build_chunk_enricher,
+    build_chunker,
+    build_converter,
     build_dense_document_embedder,
+    build_document_store,
     build_sparse_document_embedder,
 )
 

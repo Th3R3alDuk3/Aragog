@@ -1,35 +1,40 @@
-from haystack.utils import Secret
-from haystack.components.extractors import LLMMetadataExtractor
-from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.components.embedders import (
     OpenAIDocumentEmbedder,
     OpenAITextEmbedder,
 )
-from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
-from haystack_integrations.components.retrievers.qdrant import (
-    QdrantSparseEmbeddingRetriever,
-    QdrantEmbeddingRetriever,
+from haystack.components.extractors import LLMMetadataExtractor
+from haystack.components.generators.chat import OpenAIChatGenerator
+from haystack.utils import Secret
+from haystack_integrations.components.converters.docling_serve import (
+    DoclingServeConverter,
+    ExportType,
 )
 from haystack_integrations.components.embedders.fastembed import (
     FastembedSparseDocumentEmbedder,
     FastembedSparseTextEmbedder,
 )
-from haystack_integrations.components.converters.docling_serve import DoclingServeConverter, ExportType
 from haystack_integrations.components.rankers.vllm import VLLMRanker
+from haystack_integrations.components.retrievers.qdrant import (
+    QdrantEmbeddingRetriever,
+    QdrantSparseEmbeddingRetriever,
+)
+from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+from pydantic import BaseModel
 
 from components.chunker import DoclingHybridChunker
 from config import get_settings
-from models.meta import Meta
-
+from models.enrichment import EnrichedMeta
 
 settings = get_settings()
 
 
-def _build_structured_generator(format_model) -> OpenAIChatGenerator:
+def _build_structured_generator(
+    response_format: type[BaseModel],
+) -> OpenAIChatGenerator:
 
     generation_kwargs = {
         "temperature": 0,
-        "response_format": format_model,
+        "response_format": response_format,
     }
 
     if "api.openai.com" not in settings.enricher_url:
@@ -56,6 +61,7 @@ def build_document_store() -> QdrantDocumentStore:
     return QdrantDocumentStore(
         url=settings.qdrant_url,
         api_key=Secret.from_token(settings.qdrant_token),
+        timeout=settings.qdrant_timeout,
         index=settings.qdrant_collection,
         embedding_dim=settings.qdrant_embedding_dim,
         use_sparse_embeddings=True,
@@ -115,7 +121,7 @@ def build_chunker() -> DoclingHybridChunker:
 
 _CHUNK_ENRICHER_PROMPT = """\
 You are a document metadata extraction assistant.
-The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}"; 
+The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}";
 the chunk begins with its heading path within that document.
 Analyze the chunk and extract structured metadata.
 Return only what is clearly indicated by the text.
@@ -124,7 +130,7 @@ Write ALL output fields (context, keywords, hypothetical_questions) in <<LANGUAG
 chunk's language — translate where the source text is not <<LANGUAGE>>. Keeping the metadata in one
 consistent language makes keyword (BM25) search reliable.
 
-Use the document title and heading path to situate the chunk (field context); 
+Use the document title and heading path to situate the chunk (field context);
 extract every other field from the chunk content itself.
 
 <file_content>{{ document.content }}</file_content>"""
@@ -133,7 +139,7 @@ extract every other field from the chunk content itself.
 def build_chunk_enricher() -> LLMMetadataExtractor:
     return LLMMetadataExtractor(
         prompt=_CHUNK_ENRICHER_PROMPT.replace("<<LANGUAGE>>", settings.enricher_language),
-        chat_generator=_build_structured_generator(Meta),
+        chat_generator=_build_structured_generator(EnrichedMeta),
         max_workers=settings.enricher_max_workers,
     )
 

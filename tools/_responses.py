@@ -4,7 +4,6 @@ from config import get_settings
 from models.results import ChunkContent, ReadResult, SearchHit, SearchResult
 from services.storage import MinioStore
 
-
 settings = get_settings()
 
 

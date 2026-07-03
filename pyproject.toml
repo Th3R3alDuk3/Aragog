@@ -1,18 +1,18 @@
 [project]
 name = "A-RAG-OG"
-version = "0.2.0"
+version = "0.3.0"
 description = "Agentic RAG, Off Grid — a self-hosted hybrid-RAG MCP server for OpenWebUI"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docling-core[chunking]>=2.82.0",
+    "docling-core[chunking]>=2.85.0",
     "docling-serve-haystack>=1.1.0",
     "fastembed-haystack>=2.3.0",
     "fastmcp>=3.4.2",
-    "haystack-ai>=2.30.1",
+    "haystack-ai>=2.30.2",
     "minio>=7.2.20",
-    "pydantic-settings>=2.14.1",
+    "pydantic-settings>=2.14.2",
     "python-dotenv>=1.2.2",
     "qdrant-haystack>=10.3.0",
-    "vllm-haystack>=1.2.0",
+    "vllm-haystack>=1.2.1",
 ]

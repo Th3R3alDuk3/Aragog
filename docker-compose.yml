@@ -48,14 +48,14 @@ services:
     environment:
       QDRANT__LOG_LEVEL: INFO
       QDRANT__SERVICE__API_KEY: ${QDRANT_TOKEN}
-  
+
   ###################
-  # OPTIONAL 
+  # OPTIONAL
   ###################
 
   docling:
     profiles:
-    - docling
+      - docling
     image: quay.io/docling-project/docling-serve:latest
     container_name: docling
     restart: unless-stopped
@@ -85,7 +85,6 @@ services:
       --gpu-memory-utilization=0.20
       --max-model-len=8192
       --max-num-seqs=256
-      --enforce-eager
     deploy:
       resources:
         reservations:
@@ -114,7 +113,6 @@ services:
       --gpu-memory-utilization=0.20
       --max-model-len=8192
       --max-num-seqs=256
-      --enforce-eager
     deploy:
       resources:
         reservations:
