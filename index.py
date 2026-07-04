@@ -8,26 +8,11 @@ from datetime import UTC, datetime
 from itertools import batched
 from pathlib import Path
 
+from haystack import AsyncPipeline
+
 from config import get_settings
 from pipelines.indexing import build_indexing_pipeline
 from services.storage import MinioStore
-
-#--------------------------------------------
-# GLOBALS
-#--------------------------------------------
-
-
-settings = get_settings()
-
-minio_store = MinioStore(
-    settings.minio_endpoint,
-    settings.minio_user,
-    settings.minio_password,
-    settings.minio_bucket,
-)
-
-indexing_pipeline = build_indexing_pipeline()
-
 
 #--------------------------------------------
 # INDEXING
@@ -35,6 +20,8 @@ indexing_pipeline = build_indexing_pipeline()
 
 
 async def index_batch(
+    minio_store: MinioStore,
+    indexing_pipeline: AsyncPipeline,
     file_paths: list[Path],
     semaphore: Semaphore,
     batch_num: int,
@@ -76,11 +63,22 @@ async def main():
 
     args = parser.parse_args()
 
+    settings = get_settings()
+
+    minio_store = MinioStore(
+        settings.minio_endpoint,
+        settings.minio_user,
+        settings.minio_password,
+        settings.minio_bucket,
+    )
+
+    indexing_pipeline = build_indexing_pipeline()
+
     semaphore = Semaphore(args.concurrency)
     batches = [list(batch) for batch in batched(args.file_paths, args.batch_size)]
 
     await gather(*[
-        index_batch(batch, semaphore, batch_num, len(batches))
+        index_batch(minio_store, indexing_pipeline, batch, semaphore, batch_num, len(batches))
         for batch_num, batch in enumerate(batches, 1)
     ])
 

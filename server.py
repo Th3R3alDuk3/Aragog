@@ -99,7 +99,7 @@ for tool in TOOLS:
 
 if __name__ == "__main__":
     mcp.run(
-        host=settings.host,
-        port=settings.port,
+        host="0.0.0.0",
+        port=8000,
         transport="http",
     )

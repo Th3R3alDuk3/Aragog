@@ -9,9 +9,6 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
-    # Server
-    host: str
-    port: int
     # Limits & Resilience
     rate_limit_rps: float
     rate_limit_burst: int

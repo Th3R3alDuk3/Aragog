@@ -2,29 +2,37 @@ name: aragog
 
 volumes:
   minio_data:
-    driver: local
   qdrant_data:
-    driver: local
+
+x-vllm: &vllm
+  image: vllm/vllm-openai:latest
+  restart: unless-stopped
+  ipc: host
+  volumes:
+    - ./data/huggingface:/root/.cache/huggingface
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            device_ids: ["0"]
+            capabilities: [gpu]
 
 services:
 
   server:
-    profiles:
-      - server
     build: .
-    container_name: server
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "8000:8000"
     env_file: .env
     volumes:
       - ./data:/app/data
-    depends_on:
-      - minio
-      - qdrant
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   minio:
     image: docker.io/minio/minio:latest
-    container_name: minio
     restart: unless-stopped
     ports:
       - "127.0.0.1:9000:9000"
@@ -38,7 +46,6 @@ services:
 
   qdrant:
     image: docker.io/qdrant/qdrant:latest
-    container_name: qdrant
     restart: unless-stopped
     ports:
       - "127.0.0.1:6333:6333"
@@ -49,15 +56,8 @@ services:
       QDRANT__LOG_LEVEL: INFO
       QDRANT__SERVICE__API_KEY: ${QDRANT_TOKEN}
 
-  ###################
-  # OPTIONAL
-  ###################
-
   docling:
-    profiles:
-      - docling
     image: quay.io/docling-project/docling-serve:latest
-    container_name: docling
     restart: unless-stopped
     ports:
       - "127.0.0.1:5001:5001"
@@ -66,16 +66,9 @@ services:
       - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_TIMEOUT}
 
   embedder:
-    profiles:
-      - embedder
-    image: vllm/vllm-openai:latest
-    container_name: embedder
-    restart: unless-stopped
-    ipc: host
+    <<: *vllm
     ports:
       - "127.0.0.1:8001:8000"
-    volumes:
-      - ./data/huggingface:/root/.cache/huggingface
     command: >
       ${DENSE_EMBEDDING_MODEL}
       --served-model-name=${DENSE_EMBEDDING_MODEL}
@@ -85,25 +78,11 @@ services:
       --gpu-memory-utilization=0.20
       --max-model-len=8192
       --max-num-seqs=256
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["0"]
-              capabilities: [gpu]
 
   reranker:
-    profiles:
-      - reranker
-    image: vllm/vllm-openai:latest
-    container_name: reranker
-    restart: unless-stopped
-    ipc: host
+    <<: *vllm
     ports:
       - "127.0.0.1:8002:8000"
-    volumes:
-      - ./data/huggingface:/root/.cache/huggingface
     command: >
       ${RERANKER_MODEL}
       --served-model-name=${RERANKER_MODEL}
@@ -113,10 +92,3 @@ services:
       --gpu-memory-utilization=0.20
       --max-model-len=8192
       --max-num-seqs=256
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ["0"]
-              capabilities: [gpu]
