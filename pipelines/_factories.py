@@ -28,30 +28,6 @@ from models.enrichment import EnrichedMeta
 settings = get_settings()
 
 
-def _build_structured_generator(
-    response_format: type[BaseModel],
-) -> OpenAIChatGenerator:
-
-    generation_kwargs = {
-        "temperature": 0,
-        "response_format": response_format,
-    }
-
-    if "api.openai.com" not in settings.enricher_url:
-        generation_kwargs["extra_body"] = {
-            "enable_thinking": False,
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-
-    return OpenAIChatGenerator(
-        api_base_url=settings.enricher_url,
-        api_key=Secret.from_token(settings.enricher_token),
-        model=settings.enricher_model,
-        timeout=settings.enricher_timeout,
-        generation_kwargs=generation_kwargs,
-    )
-
-
 #-----------------------------------------------------
 # Document Store
 #-----------------------------------------------------
@@ -119,6 +95,30 @@ def build_chunker() -> DoclingHybridChunker:
 #-----------------------------------------------------
 
 
+def build_chat_generator(
+    response_format: type[BaseModel] | None = None,
+) -> OpenAIChatGenerator:
+
+    generation_kwargs = {"temperature": 0}
+
+    if response_format is not None:
+        generation_kwargs["response_format"] = response_format
+
+    if "api.openai.com" not in settings.enricher_url:
+        generation_kwargs["extra_body"] = {
+            "enable_thinking": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+
+    return OpenAIChatGenerator(
+        api_base_url=settings.enricher_url,
+        api_key=Secret.from_token(settings.enricher_token),
+        model=settings.enricher_model,
+        timeout=settings.enricher_timeout,
+        generation_kwargs=generation_kwargs,
+    )
+
+
 _CHUNK_ENRICHER_PROMPT = """\
 You are a document metadata extraction assistant.
 The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}";
@@ -139,7 +139,7 @@ extract every other field from the chunk content itself.
 def build_chunk_enricher() -> LLMMetadataExtractor:
     return LLMMetadataExtractor(
         prompt=_CHUNK_ENRICHER_PROMPT.replace("<<LANGUAGE>>", settings.enricher_language),
-        chat_generator=_build_structured_generator(EnrichedMeta),
+        chat_generator=build_chat_generator(EnrichedMeta),
         max_workers=settings.enricher_max_workers,
     )
 
@@ -195,7 +195,7 @@ def build_sparse_text_embedder() -> FastembedSparseTextEmbedder:
 
 
 def build_dense_embedding_retriever(
-    document_store: QdrantDocumentStore
+    document_store: QdrantDocumentStore,
 ) -> QdrantEmbeddingRetriever:
     return QdrantEmbeddingRetriever(
         document_store=document_store,
@@ -203,7 +203,7 @@ def build_dense_embedding_retriever(
 
 
 def build_sparse_embedding_retriever(
-    document_store: QdrantDocumentStore
+    document_store: QdrantDocumentStore,
 ) -> QdrantSparseEmbeddingRetriever:
     return QdrantSparseEmbeddingRetriever(
         document_store=document_store,

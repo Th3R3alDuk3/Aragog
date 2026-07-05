@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str
     # S3 Storage
-    minio_endpoint: str
+    minio_url: str
     minio_user: str
     minio_password: str
     minio_bucket: str

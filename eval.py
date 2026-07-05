@@ -16,24 +16,20 @@ from haystack.components.evaluators import (
 )
 from haystack.components.evaluators.document_recall import RecallMode
 from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.utils import Secret
+from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from config import get_settings
-from pipelines._factories import build_document_store
+from pipelines._factories import build_chat_generator, build_document_store
 from pipelines.retrieval import (
     build_dense_retrieval_pipeline,
     build_hybrid_retrieval_pipeline,
     build_sparse_retrieval_pipeline,
 )
 
-#--------------------------------------------
-# GLOBALS
-#--------------------------------------------
+#-----------------------------------------------------
+# Globals
+#-----------------------------------------------------
 
-
-settings = get_settings()
-
-document_store = build_document_store()
 
 BUILDERS = {
     "dense": build_dense_retrieval_pipeline,
@@ -42,30 +38,21 @@ BUILDERS = {
 }
 
 
-#--------------------------------------------
-# GOLDEN SET
-#--------------------------------------------
-
-
-def build_question_generator() -> OpenAIChatGenerator:
-    return OpenAIChatGenerator(
-        api_base_url=settings.enricher_url,
-        api_key=Secret.from_token(settings.enricher_token),
-        model=settings.enricher_model,
-        timeout=settings.enricher_timeout,
-        generation_kwargs={"temperature": 0},
-    )
+#-----------------------------------------------------
+# Golden Set
+#-----------------------------------------------------
 
 
 async def generate_question(
-    content: str,
     generator: OpenAIChatGenerator,
+    content: str,
+    language: str,
     semaphore: Semaphore,
 ) -> str:
 
     prompt = (
         f"Below is an excerpt from a document. Write ONE specific question in "
-        f"{settings.enricher_language} that is answerable solely from this excerpt — "
+        f"{language} that is answerable solely from this excerpt — "
         f"the kind of question a real user would ask. Output only the question.\n\n"
         f"<excerpt>\n{content}\n</excerpt>"
     )
@@ -77,6 +64,8 @@ async def generate_question(
 
 
 async def generate(
+    document_store: QdrantDocumentStore,
+    language: str,
     output: Path,
     num_questions: int,
     seed: int,
@@ -97,10 +86,11 @@ async def generate(
     Random(seed).shuffle(documents)
     sample = documents[:num_questions]
 
-    generator = build_question_generator()
+    generator = build_chat_generator()
     semaphore = Semaphore(concurrency)
     questions = await gather(*[
-        generate_question(doc.content, generator, semaphore) for doc in sample
+        generate_question(generator, doc.content, language, semaphore)
+        for doc in sample
     ])
 
     golden = [
@@ -111,12 +101,12 @@ async def generate(
 
     output.write_text(dumps(golden, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote {len(golden)} query/chunk pairs to {output} "
-        f"(language: {settings.enricher_language})")
+        f"(language: {language})")
 
 
-#--------------------------------------------
-# EVALUATION
-#--------------------------------------------
+#-----------------------------------------------------
+# Evaluation
+#-----------------------------------------------------
 
 
 async def retrieve(
@@ -184,6 +174,7 @@ def report(
 
 
 async def evaluate(
+    document_store: QdrantDocumentStore,
     golden_set_path: Path,
     modes: list[str],
     top_k_before: int,
@@ -211,9 +202,9 @@ async def evaluate(
     report(metrics_by_mode, len(queries), top_k_after)
 
 
-#--------------------------------------------
+#-----------------------------------------------------
 # CLI
-#--------------------------------------------
+#-----------------------------------------------------
 
 
 async def main():
@@ -248,11 +239,16 @@ async def main():
 
     args = parser.parse_args()
 
+    settings = get_settings()
+    document_store = build_document_store()
+
     if args.command == "generate":
-        await generate(args.output, args.num_questions, args.seed,
+        await generate(document_store, settings.enricher_language,
+            args.output, args.num_questions, args.seed,
             args.min_chars, args.concurrency)
     else:
-        await evaluate(args.golden_set, args.modes, args.top_k_before, args.top_k_after)
+        await evaluate(document_store, args.golden_set, args.modes,
+            args.top_k_before, args.top_k_after)
 
 
 if __name__ == "__main__":

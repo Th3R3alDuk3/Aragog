@@ -7,6 +7,17 @@ from services.storage import MinioStore
 settings = get_settings()
 
 
+def _source_url(
+    document: Document,
+    minio_store: MinioStore,
+) -> str:
+    url = minio_store.presigned_url(
+        document.meta.get("source"), settings.minio_url_expire)
+    # fragment stays client-side, so the presigned signature is unaffected
+    page = document.meta.get("page_number")
+    return f"{url}#page={page}" if page else url
+
+
 def _search_hits(
     documents: list[Document],
     minio_store: MinioStore,
@@ -15,8 +26,7 @@ def _search_hits(
         id=document.id,
         score=document.score,
         source=document.meta.get("source"),
-        url=minio_store.presigned_url(
-            document.meta.get("source"), settings.minio_url_expire),
+        url=_source_url(document, minio_store),
         page=document.meta.get("page_number"),
         headings=document.meta.get("headings", []),
         snippet=(
@@ -33,8 +43,7 @@ def _chunk_contents(
     return [ChunkContent(
         id=document.id,
         source=document.meta.get("source"),
-        url=minio_store.presigned_url(
-            document.meta.get("source"), settings.minio_url_expire),
+        url=_source_url(document, minio_store),
         page=document.meta.get("page_number"),
         content=document.content,
     ) for document in documents]

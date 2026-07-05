@@ -98,4 +98,3 @@ async def read_neighbors(
     ))
 
     return read_response(neighbors, minio_store)
-

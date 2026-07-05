@@ -35,6 +35,10 @@ Index documents into the running stack:
 docker compose run --rm -v ./mydocs:/docs server python index.py /docs/doc1.pdf
 ```
 
+Indexing is idempotent: chunk ids are deterministic (source, position and
+content), so re-running `index.py` over the same files updates chunks in
+place instead of duplicating them — a failed run can simply be repeated.
+
 Point OpenWebUI's MCP integration at `http://HOST:8000` (streamable-http) —
 the seven retrieval tools become available to the agent.
 
@@ -101,7 +105,7 @@ uv run python server.py                     # run the MCP server
 ```
 
 The backing services also bind to `127.0.0.1` — point the service URLs in
-`.env` at them (`localhost:9000`, `http://localhost:6333`,
+`.env` at them (`http://localhost:9000`, `http://localhost:6333`,
 `http://localhost:5001`, `http://localhost:8001/v1`, `http://localhost:8002/v1`):
 
 | Service | Port | Description |
@@ -119,9 +123,15 @@ The backing services also bind to `127.0.0.1` — point the service URLs in
 Everything is configured through `.env` — start from
 [.env.example](.env.example), which documents the non-obvious constraints
 inline. It is the single source of truth; the compose file sets no overrides.
-The defaults use the compose-network hostnames (`minio:9000`,
-`http://qdrant:6333`, …); when running `index.py` / `server.py` on the host,
+The defaults use the compose-network hostnames (`http://qdrant:6333`,
+`http://docling:5001`, …); when running `index.py` / `server.py` on the host,
 switch them to their `localhost` ports.
+
+The exception is `MINIO_URL`: presigned source URLs embed this host, so it
+must be reachable by the user's browser as well — use an address that works
+for both the server and the browser (e.g. the docker host's IP), and publish
+MinIO's port `9000` beyond `127.0.0.1` in the compose file if browsers
+connect from other machines. `https://` turns on TLS for the connection.
 
 ---
 

@@ -15,8 +15,8 @@ class SearchHit(BaseModel):
     )
     url: str | None = Field(
         description=(
-            "Temporary presigned URL to download the source document; "
-            "expires after a short time."
+            "Temporary presigned URL to open the source document; anchored "
+            "to the chunk's page (#page=N) and expires after a short time."
         ),
     )
     page: int | None = Field(
@@ -44,8 +44,8 @@ class ChunkContent(BaseModel):
     )
     url: str | None = Field(
         description=(
-            "Temporary presigned URL to download the source document; "
-            "expires after a short time."
+            "Temporary presigned URL to open the source document; anchored "
+            "to the chunk's page (#page=N) and expires after a short time."
         ),
     )
     page: int | None = Field(

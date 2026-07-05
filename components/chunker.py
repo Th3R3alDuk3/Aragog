@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
 from docling_core.types import DoclingDocument
 from fastmcp.utilities.logging import get_logger
@@ -45,8 +47,13 @@ class DoclingHybridChunker:
                     for doc_item in chunk.meta.doc_items
                 })
 
+                content = self._chunker.contextualize(chunk)
+
                 all_chunks.append(Document(
-                    content=self._chunker.contextualize(chunk),
+                    id=sha256(
+                        f"{document.meta.get('source')}:{chunk_index}:{content}".encode()
+                    ).hexdigest(),
+                    content=content,
                     meta={
                         **document.meta,
                         "headings": chunk.meta.headings or [],

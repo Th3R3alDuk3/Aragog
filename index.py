@@ -14,9 +14,9 @@ from config import get_settings
 from pipelines.indexing import build_indexing_pipeline
 from services.storage import MinioStore
 
-#--------------------------------------------
-# INDEXING
-#--------------------------------------------
+#-----------------------------------------------------
+# Indexing
+#-----------------------------------------------------
 
 
 async def index_batch(
@@ -26,28 +26,41 @@ async def index_batch(
     semaphore: Semaphore,
     batch_num: int,
     total_batches: int,
-) -> None:
+) -> bool:
 
     async with semaphore:
 
-        for file_path in file_paths:
-            await minio_store.upload(file_path, file_path.name)
+        try:
 
-        result = await indexing_pipeline.run_async({
-            "converter": {
-                "sources": file_paths,
-                "meta": [{
-                    "source": file_path.name,
-                    "created_at": datetime.fromtimestamp(
-                        file_path.stat().st_mtime, tz=UTC).isoformat(),
-                } for file_path in file_paths],
-            },
-        })
+            for file_path in file_paths:
+                await minio_store.upload(file_path, file_path.name)
+
+            result = await indexing_pipeline.run_async({
+                "converter": {
+                    "sources": file_paths,
+                    "meta": [{
+                        "source": file_path.name,
+                        "modified_at": datetime.fromtimestamp(
+                            file_path.stat().st_mtime, tz=UTC).isoformat(),
+                    } for file_path in file_paths],
+                },
+            })
+
+        except Exception as error:
+            print(f"[{batch_num}/{total_batches}] {len(file_paths)} file(s) "
+                f"→ FAILED: {error}")
+            return False
 
         chunks_written = result.get("writer", {}).get("documents_written", 0)
-        print("+---------------------------------------------------------------")
-        print(f"| [{batch_num}/{total_batches}] {len(file_paths)} file(s) → {chunks_written} chunk(s)")
-        print("+---------------------------------------------------------------")
+        chunks_failed = len(
+            result.get("chunk_enricher", {}).get("failed_documents", []))
+
+        summary = (f"[{batch_num}/{total_batches}] {len(file_paths)} file(s) "
+            f"→ {chunks_written} chunk(s)")
+        if chunks_failed:
+            summary += f", {chunks_failed} failed enrichment"
+        print(summary)
+        return chunks_failed == 0
 
 
 async def main():
@@ -66,7 +79,7 @@ async def main():
     settings = get_settings()
 
     minio_store = MinioStore(
-        settings.minio_endpoint,
+        settings.minio_url,
         settings.minio_user,
         settings.minio_password,
         settings.minio_bucket,
@@ -77,10 +90,13 @@ async def main():
     semaphore = Semaphore(args.concurrency)
     batches = [list(batch) for batch in batched(args.file_paths, args.batch_size)]
 
-    await gather(*[
+    results = await gather(*[
         index_batch(minio_store, indexing_pipeline, batch, semaphore, batch_num, len(batches))
         for batch_num, batch in enumerate(batches, 1)
     ])
+
+    if not all(results):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

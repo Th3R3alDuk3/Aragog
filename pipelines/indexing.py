@@ -28,7 +28,7 @@ def build_indexing_pipeline() -> AsyncPipeline:
     pipeline.add_component("sparse_embedder",
         build_sparse_document_embedder())
     pipeline.add_component("writer",
-        DocumentWriter(document_store=document_store, policy=DuplicatePolicy.SKIP))
+        DocumentWriter(document_store=document_store, policy=DuplicatePolicy.OVERWRITE))
 
     pipeline.connect("converter.documents", "chunker.documents")
     pipeline.connect("chunker.documents", "chunk_enricher.documents")

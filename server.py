@@ -25,17 +25,17 @@ from tools import TOOLS
 configure_logging()
 
 
-#--------------------------------------------
-# GLOBALS
-#--------------------------------------------
+#-----------------------------------------------------
+# Globals
+#-----------------------------------------------------
 
 
 settings = get_settings()
 
 
-#--------------------------------------------
-# SERVER
-#--------------------------------------------
+#-----------------------------------------------------
+# Server
+#-----------------------------------------------------
 
 
 @composable_lifespan
@@ -46,7 +46,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     yield {
         "document_store": document_store,
         "minio_store": MinioStore(
-            settings.minio_endpoint,
+            settings.minio_url,
             settings.minio_user,
             settings.minio_password,
             settings.minio_bucket,

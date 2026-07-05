@@ -1,6 +1,7 @@
 from asyncio import to_thread
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from minio import Minio
 
@@ -8,17 +9,21 @@ from minio import Minio
 class MinioStore:
 
     def __init__(self,
-        endpoint: str,
+        url: str,
         access_key: str,
         secret_key: str,
         bucket_name: str,
     ) -> None:
 
+        parts = urlsplit(url)
+
         self._client = Minio(
-            endpoint=endpoint,
+            endpoint=parts.netloc,
             access_key=access_key,
             secret_key=secret_key,
-            secure=False,
+            secure=parts.scheme == "https",
+            # no cert verification: off-grid TLS is typically self-signed
+            cert_check=False,
         )
 
         self._bucket_name = bucket_name

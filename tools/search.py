@@ -195,20 +195,28 @@ async def filtered_search(
         ),
     )],
     date_from: Annotated[str, Field(
-        description="Earliest date (ISO YYYY-MM-DD) the chunk may refer to.",
-    )] = "",
-    date_to: Annotated[str, Field(
-        description="Latest date (ISO YYYY-MM-DD) the chunk may refer to.",
-    )] = "",
-    created_from: Annotated[str, Field(
         description=(
-            "Earliest creation date (ISO YYYY-MM-DD) of the source file the "
-            "chunk comes from."
+            "Earliest date (ISO YYYY-MM-DD) the chunk may refer to. Matches "
+            "chunks mentioning any date on or after it."
         ),
     )] = "",
-    created_to: Annotated[str, Field(
+    date_to: Annotated[str, Field(
         description=(
-            "Latest creation date (ISO YYYY-MM-DD) of the source file, "
+            "Latest date (ISO YYYY-MM-DD) the chunk may refer to. Matches "
+            "chunks mentioning any date on or before it; combined with "
+            "date_from, the two bounds may be satisfied by different dates "
+            "in the same chunk."
+        ),
+    )] = "",
+    modified_from: Annotated[str, Field(
+        description=(
+            "Earliest modification date (ISO YYYY-MM-DD) of the source file "
+            "the chunk comes from."
+        ),
+    )] = "",
+    modified_to: Annotated[str, Field(
+        description=(
+            "Latest modification date (ISO YYYY-MM-DD) of the source file, "
             "inclusive of the whole day."
         ),
     )] = "",
@@ -258,18 +266,18 @@ async def filtered_search(
             "value": date_to,
         })
 
-    if created_from:
+    if modified_from:
         conditions.append({
-            "field": "meta.created_at",
+            "field": "meta.modified_at",
             "operator": ">=",
-            "value": created_from,
+            "value": modified_from,
         })
 
-    if created_to:
+    if modified_to:
         conditions.append({
-            "field": "meta.created_at",
+            "field": "meta.modified_at",
             "operator": "<=",
-            "value": created_to if "T" in created_to else f"{created_to}T23:59:59",
+            "value": modified_to if "T" in modified_to else f"{modified_to}T23:59:59",
         })
 
     filters = {
