@@ -14,8 +14,7 @@
 ## 🚀 Quick Start
 
 One compose file runs the whole self-hosted stack — MCP server, MinIO,
-Qdrant, Docling, embedder and reranker. Only the server (`:8000`) is exposed
-beyond the host.
+Qdrant, Docling, embedder and reranker. 
 
 **Requires:** Docker with the NVIDIA container toolkit (for the bundled
 embedder/reranker — not needed with external endpoints); `uv` for development.
@@ -39,7 +38,7 @@ Indexing is idempotent: chunk ids are deterministic (source, position and
 content), so re-running `index.py` over the same files updates chunks in
 place instead of duplicating them — a failed run can simply be repeated.
 
-Point OpenWebUI's MCP integration at `http://HOST:8000` (streamable-http) —
+Point OpenWebUI's MCP integration at `http://HOST:8000/mcp` (streamable-http) —
 the seven retrieval tools become available to the agent.
 
 > **LLM endpoints:** enrichment (indexing), embeddings and reranking are
