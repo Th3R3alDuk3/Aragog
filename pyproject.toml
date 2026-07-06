@@ -5,10 +5,10 @@ description = "Agentic RAG, Off Grid — a self-hosted hybrid-RAG MCP server for
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "docling-core[chunking]>=2.85.0",
+    "docling-core[chunking]>=2.86.0",
     "docling-serve-haystack>=1.1.0",
     "fastembed-haystack>=2.3.0",
-    "fastmcp>=3.4.2",
+    "fastmcp>=3.4.3",
     "haystack-ai>=2.30.2",
     "minio>=7.2.20",
     "pydantic-settings>=2.14.2",

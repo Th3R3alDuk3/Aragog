@@ -39,7 +39,9 @@ content), so re-running `index.py` over the same files updates chunks in
 place instead of duplicating them — a failed run can simply be repeated.
 
 Point OpenWebUI's MCP integration at `http://HOST:8000/mcp` (streamable-http) —
-the seven retrieval tools become available to the agent.
+the seven retrieval tools become available to the agent. Give the OpenWebUI
+model the system prompt from [PROMPT.md](PROMPT.md); it enforces the
+search → read → cite workflow.
 
 > **LLM endpoints:** enrichment (indexing), embeddings and reranking are
 > ordinary OpenAI-compatible endpoints configured in `.env` — mix and match
@@ -114,6 +116,25 @@ The backing services also bind to `127.0.0.1` — point the service URLs in
 | Docling | 5001 | Document converter |
 | Embedder | 8001 | vLLM dense embedding server (GPU) |
 | Reranker | 8002 | vLLM rerank server (GPU) |
+
+### Tests & retrieval eval
+
+The unit tests cover the pure logic (chunking, filter building, response
+shaping) and run without any services:
+
+```bash
+uv run --with pytest python -m pytest tests/
+```
+
+`eval.py` measures retrieval quality against your own indexed documents: it
+samples chunks from the live index, generates one question per chunk with the
+enricher LLM, then scores each retrieval mode by whether the right chunk
+comes back:
+
+```bash
+uv run python eval.py generate -n 50    # golden set from the live index
+uv run python eval.py run               # Recall / MRR / MAP for dense, sparse, hybrid
+```
 
 ---
 
