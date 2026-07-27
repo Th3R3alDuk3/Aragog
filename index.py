@@ -8,11 +8,13 @@ from datetime import UTC, datetime
 from itertools import batched
 from pathlib import Path
 
-from haystack import AsyncPipeline
+from haystack import Pipeline
 
 from config import get_settings
+from pipelines._factories import build_document_store
 from pipelines.indexing import build_indexing_pipeline
 from services.storage import MinioStore
+
 
 #-----------------------------------------------------
 # Indexing
@@ -21,7 +23,7 @@ from services.storage import MinioStore
 
 async def index_batch(
     minio_store: MinioStore,
-    indexing_pipeline: AsyncPipeline,
+    indexing_pipeline: Pipeline,
     file_paths: list[Path],
     semaphore: Semaphore,
     batch_num: int,
@@ -85,7 +87,8 @@ async def main():
         settings.minio_bucket,
     )
 
-    indexing_pipeline = build_indexing_pipeline()
+    document_store = build_document_store()
+    indexing_pipeline = build_indexing_pipeline(document_store)
 
     semaphore = Semaphore(args.concurrency)
     batches = [list(batch) for batch in batched(args.file_paths, args.batch_size)]

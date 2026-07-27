@@ -1,22 +1,22 @@
-from haystack import AsyncPipeline
+from haystack import Pipeline
 from haystack.components.writers import DocumentWriter
 from haystack.document_stores.types import DuplicatePolicy
+from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 
 from pipelines._factories import (
     build_chunk_enricher,
     build_chunker,
     build_converter,
     build_dense_document_embedder,
-    build_document_store,
     build_sparse_document_embedder,
 )
 
 
-def build_indexing_pipeline() -> AsyncPipeline:
+def build_indexing_pipeline(
+    document_store: QdrantDocumentStore,
+) -> Pipeline:
 
-    document_store = build_document_store()
-
-    pipeline = AsyncPipeline()
+    pipeline = Pipeline()
     pipeline.add_component("converter",
         build_converter())
     pipeline.add_component("chunker",

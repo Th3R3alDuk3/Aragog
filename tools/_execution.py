@@ -1,7 +1,7 @@
 from asyncio import Semaphore, timeout
 
 from fastmcp.exceptions import ToolError
-from haystack import AsyncPipeline, Document
+from haystack import Document, Pipeline
 
 from config import get_settings
 
@@ -9,7 +9,7 @@ settings = get_settings()
 
 
 async def run_search(
-    pipeline: AsyncPipeline,
+    pipeline: Pipeline,
     inputs: dict,
     limiter: Semaphore,
 ) -> list[Document]:

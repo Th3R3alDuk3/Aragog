@@ -8,7 +8,7 @@ from json import dumps, loads
 from pathlib import Path
 from random import Random
 
-from haystack import AsyncPipeline, Document
+from haystack import Document, Pipeline
 from haystack.components.evaluators import (
     DocumentMAPEvaluator,
     DocumentMRREvaluator,
@@ -25,6 +25,7 @@ from pipelines.retrieval import (
     build_hybrid_retrieval_pipeline,
     build_sparse_retrieval_pipeline,
 )
+
 
 #-----------------------------------------------------
 # Globals
@@ -110,7 +111,7 @@ async def generate(
 
 
 async def retrieve(
-    pipeline: AsyncPipeline,
+    pipeline: Pipeline,
     mode: str,
     query: str,
     top_k_before: int,

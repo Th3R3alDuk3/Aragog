@@ -38,6 +38,8 @@ docker compose run --rm -v ./mydocs:/docs server python index.py /docs/doc1.pdf
 Indexing is idempotent: chunk ids are deterministic (source, position and
 content), so re-running `index.py` over the same files updates chunks in
 place instead of duplicating them — a failed run can simply be repeated.
+Chunk content changes (an edited file, a changed chunker) get new ids, so
+rebuild the collection then instead of re-indexing over the old one.
 
 Point OpenWebUI's MCP integration at `http://HOST:8000` (streamable-http) —
 the seven retrieval tools become available to the agent.

@@ -5,7 +5,7 @@ volumes:
   qdrant_data:
 
 x-vllm: &vllm
-  image: vllm/vllm-openai:latest
+  image: vllm/vllm-openai:v0.26.0
   restart: unless-stopped
   ipc: host
   volumes:
@@ -32,7 +32,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   minio:
-    image: docker.io/minio/minio:latest
+    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
     ports:
       - "127.0.0.1:9000:9000"
@@ -45,7 +45,7 @@ services:
     command: server /data --console-address ":9001"
 
   qdrant:
-    image: docker.io/qdrant/qdrant:latest
+    image: docker.io/qdrant/qdrant:v1.18.2
     restart: unless-stopped
     ports:
       - "127.0.0.1:6333:6333"
@@ -57,7 +57,7 @@ services:
       QDRANT__SERVICE__API_KEY: ${QDRANT_TOKEN}
 
   docling:
-    image: quay.io/docling-project/docling-serve:latest
+    image: quay.io/docling-project/docling-serve:v1.28.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:5001:5001"
