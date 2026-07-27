@@ -14,8 +14,7 @@
 ## 🚀 Quick Start
 
 One compose file runs the whole self-hosted stack — MCP server, MinIO,
-Qdrant, Docling, embedder and reranker. Only the server (`:8000`) is exposed
-beyond the host.
+Qdrant, Docling, embedder and reranker. 
 
 **Requires:** Docker with the NVIDIA container toolkit (for the bundled
 embedder/reranker — not needed with external endpoints); `uv` for development.
@@ -41,8 +40,10 @@ place instead of duplicating them — a failed run can simply be repeated.
 Chunk content changes (an edited file, a changed chunker) get new ids, so
 rebuild the collection then instead of re-indexing over the old one.
 
-Point OpenWebUI's MCP integration at `http://HOST:8000` (streamable-http) —
-the seven retrieval tools become available to the agent.
+Point OpenWebUI's MCP integration at `http://HOST:8000/mcp` (streamable-http) —
+the seven retrieval tools become available to the agent. Give the OpenWebUI
+model the system prompt from [PROMPT.md](PROMPT.md); it enforces the
+search → read → cite workflow.
 
 > **LLM endpoints:** enrichment (indexing), embeddings and reranking are
 > ordinary OpenAI-compatible endpoints configured in `.env` — mix and match
@@ -117,6 +118,25 @@ The backing services also bind to `127.0.0.1` — point the service URLs in
 | Docling | 5001 | Document converter |
 | Embedder | 8001 | vLLM dense embedding server (GPU) |
 | Reranker | 8002 | vLLM rerank server (GPU) |
+
+### Tests & retrieval eval
+
+The unit tests cover the pure logic (chunking, filter building, response
+shaping) and run without any services:
+
+```bash
+uv run --with pytest python -m pytest tests/
+```
+
+`eval.py` measures retrieval quality against your own indexed documents: it
+samples chunks from the live index, generates one question per chunk with the
+enricher LLM, then scores each retrieval mode by whether the right chunk
+comes back:
+
+```bash
+uv run python eval.py generate -n 50    # golden set from the live index
+uv run python eval.py run               # Recall / MRR / MAP for dense, sparse, hybrid
+```
 
 ---
 

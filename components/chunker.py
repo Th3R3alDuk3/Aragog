@@ -1,6 +1,7 @@
 from hashlib import sha256
 
 from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
+from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
 from docling_core.types import DoclingDocument
 from fastmcp.utilities.logging import get_logger
 from haystack import Document, component
@@ -16,9 +17,7 @@ class DoclingHybridChunker:
         max_tokens: int,
     ) -> None:
         self._chunker = HybridChunker(
-            tokenizer=tokenizer,
-            max_tokens=max_tokens,
-        )
+            tokenizer=HuggingFaceTokenizer.from_pretrained(tokenizer, max_tokens))
 
     @component.output_types(documents=list[Document])
     def run(self,
