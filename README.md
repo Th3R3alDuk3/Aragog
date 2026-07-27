@@ -14,7 +14,7 @@
 ## 🚀 Quick Start
 
 One compose file runs the whole self-hosted stack — MCP server, MinIO,
-Qdrant, Docling, embedder and reranker. 
+Qdrant, Docling, embedder and reranker.
 
 **Requires:** Docker with the NVIDIA container toolkit (for the bundled
 embedder/reranker — not needed with external endpoints); `uv` for development.
@@ -119,14 +119,7 @@ The backing services also bind to `127.0.0.1` — point the service URLs in
 | Embedder | 8001 | vLLM dense embedding server (GPU) |
 | Reranker | 8002 | vLLM rerank server (GPU) |
 
-### Tests & retrieval eval
-
-The unit tests cover the pure logic (chunking, filter building, response
-shaping) and run without any services:
-
-```bash
-uv run --with pytest python -m pytest tests/
-```
+### Retrieval eval
 
 `eval.py` measures retrieval quality against your own indexed documents: it
 samples chunks from the live index, generates one question per chunk with the
