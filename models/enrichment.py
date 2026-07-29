@@ -12,8 +12,7 @@ class EnrichedMeta(BaseModel):
             "section of the Product X manual covers the warranty: 24 months "
             "from delivery, wearing parts excluded.'). Do not simply repeat the "
             "heading or title — write complete sentences describing the "
-            "chunk's content. Written in the chunk's language to improve "
-            "retrieval."
+            "chunk's content."
         ),
     )
     keywords: list[str] = Field(
@@ -33,9 +32,8 @@ class EnrichedMeta(BaseModel):
         description=(
             "2-3 distinct questions a user might ask that this chunk "
             "directly answers, phrased naturally as a real query (e.g. "
-            "['Wie lange gilt die Garantie auf Produkt X?']). Written in the "
-            "chunk's language to improve retrieval. Empty list if the chunk "
-            "answers no clear question."
+            "['Wie lange gilt die Garantie auf Produkt X?']). Empty list if "
+            "the chunk answers no clear question."
         ),
     )
     dates: list[str] = Field(

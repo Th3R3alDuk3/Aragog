@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     enricher_url: str
     enricher_token: str
     enricher_timeout: int
+    enricher_max_retries: int
     enricher_max_workers: int
     enricher_language: str
     # Embedders (Dense + Sparse)

@@ -99,14 +99,18 @@ def build_chat_generator(
     response_format: type[BaseModel] | None = None,
 ) -> OpenAIChatGenerator:
 
-    generation_kwargs = {"temperature": 0}
+    generation_kwargs = {
+        "temperature": 0,
+        # bounds runaway generations (e.g. greedy repetition loops on local vLLM)
+        "max_completion_tokens": 8192,
+    }
 
     if response_format is not None:
         generation_kwargs["response_format"] = response_format
 
+    # api.openai.com rejects unknown request params with 400
     if "api.openai.com" not in settings.enricher_url:
         generation_kwargs["extra_body"] = {
-            "enable_thinking": False,
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
@@ -115,6 +119,7 @@ def build_chat_generator(
         api_key=Secret.from_token(settings.enricher_token),
         model=settings.enricher_model,
         timeout=settings.enricher_timeout,
+        max_retries=settings.enricher_max_retries,
         generation_kwargs=generation_kwargs,
     )
 
@@ -133,12 +138,22 @@ consistent language makes keyword (BM25) search reliable.
 Use the document title and heading path to situate the chunk (field context);
 extract every other field from the chunk content itself.
 
+Content rules for each output field:
+<<FIELD_REQUIREMENTS>>
+
 <file_content>{{ document.content }}</file_content>"""
 
 
 def build_chunk_enricher() -> LLMMetadataExtractor:
+    # vLLM-class backends never show the json_schema descriptions to the model
+    field_requirements = "\n".join(
+        f"- {name}: {field.description}"
+        for name, field in EnrichedMeta.model_fields.items())
+    prompt = (_CHUNK_ENRICHER_PROMPT
+        .replace("<<LANGUAGE>>", settings.enricher_language)
+        .replace("<<FIELD_REQUIREMENTS>>", field_requirements))
     return LLMMetadataExtractor(
-        prompt=_CHUNK_ENRICHER_PROMPT.replace("<<LANGUAGE>>", settings.enricher_language),
+        prompt=prompt,
         chat_generator=build_chat_generator(EnrichedMeta),
         max_workers=settings.enricher_max_workers,
     )

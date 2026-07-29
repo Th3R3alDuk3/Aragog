@@ -50,8 +50,10 @@ search → read → cite workflow.
 > freely. The bundled embedder + reranker are vLLM containers and need an
 > NVIDIA GPU; `DENSE_EMBEDDING_URL` / `RERANKER_URL` can just as well point
 > at any external service (OpenAI, vLLM, TEI, …). The enricher
-> (`ENRICHER_URL`) works the same — OpenAI, or e.g. Ollama on the docker host
-> via `http://host.docker.internal:11434/v1`.
+> (`ENRICHER_URL`) works the same and needs a model with structured-output
+> (json_schema) support — e.g. OpenRouter (`https://openrouter.ai/api/v1`,
+> `deepseek/deepseek-v4-flash`), OpenAI, or Ollama on the docker host via
+> `http://host.docker.internal:11434/v1`.
 
 ---
 
