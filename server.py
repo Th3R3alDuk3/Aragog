@@ -19,7 +19,7 @@ from pipelines.retrieval import (
     build_hybrid_retrieval_pipeline,
     build_sparse_retrieval_pipeline,
 )
-from services.storage import MinioStore
+from services.minio import MinioStore
 from tools import TOOLS
 
 configure_logging()
@@ -43,19 +43,23 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     document_store = build_document_store()
 
-    yield {
-        "document_store": document_store,
-        "minio_store": MinioStore(
-            settings.minio_url,
-            settings.minio_user,
-            settings.minio_password,
-            settings.minio_bucket,
-        ),
-        "dense_pipeline": build_dense_retrieval_pipeline(document_store),
-        "sparse_pipeline": build_sparse_retrieval_pipeline(document_store),
-        "hybrid_pipeline": build_hybrid_retrieval_pipeline(document_store),
-        "search_limiter": Semaphore(settings.search_max_concurrency),
-    }
+    try:
+        yield {
+            "document_store": document_store,
+            "minio_store": MinioStore(
+                settings.minio_url,
+                settings.minio_public_url,
+                settings.minio_user,
+                settings.minio_password,
+                settings.minio_bucket,
+            ),
+            "dense_pipeline": build_dense_retrieval_pipeline(document_store),
+            "sparse_pipeline": build_sparse_retrieval_pipeline(document_store),
+            "hybrid_pipeline": build_hybrid_retrieval_pipeline(document_store),
+            "search_limiter": Semaphore(settings.search_max_concurrency),
+        }
+    finally:
+        await document_store.close_async()
 
 
 INSTRUCTIONS = """\
@@ -67,7 +71,7 @@ terms) only when you specifically want one modality, or `filtered_search` to res
 by keywords, entities, content types or date. Use `find_related` to pull more chunks that mention the
 same entities as a promising hit (associative multi-hop). Each search returns chunk ids
 with short snippets; call
-`read_chunk` to read promising chunks in full, or `read_neighbors` to read the chunks
+`read_chunks` to read promising chunks in full, or `read_neighbors` to read the chunks
 immediately before and after a hit when you need its surrounding context. Decompose complex questions and search
 in several rounds. Ground every answer strictly in the retrieved chunks and cite their ids.
 """.strip()

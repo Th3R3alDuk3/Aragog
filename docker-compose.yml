@@ -5,7 +5,7 @@ volumes:
   qdrant_data:
 
 x-vllm: &vllm
-  image: vllm/vllm-openai:v0.26.0
+  image: vllm/vllm-openai:v0.27.1
   restart: unless-stopped
   ipc: host
   volumes:
@@ -35,7 +35,8 @@ services:
     image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9000:9000"
+      # not loopback: MINIO_URL is embedded in presigned links the browser opens
+      - "0.0.0.0:9000:9000"
       - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
@@ -45,7 +46,7 @@ services:
     command: server /data --console-address ":9001"
 
   qdrant:
-    image: docker.io/qdrant/qdrant:v1.18.2
+    image: docker.io/qdrant/qdrant:v1.19.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:6333:6333"
@@ -57,7 +58,7 @@ services:
       QDRANT__SERVICE__API_KEY: ${QDRANT_TOKEN}
 
   docling:
-    image: quay.io/docling-project/docling-serve:v1.28.0
+    image: quay.io/docling-project/docling-serve:v1.31.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:5001:5001"

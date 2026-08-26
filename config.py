@@ -13,12 +13,15 @@ class Settings(BaseSettings):
     rate_limit_rps: float
     rate_limit_burst: int
     search_max_concurrency: int
-    search_timeout: int
+    search_top_k_before: int
+    search_top_k_after: int
+    tool_timeout: int
     # Auth (OpenWebUI JWT)
     jwt_secret: str
     jwt_algorithm: str
     # S3 Storage
     minio_url: str
+    minio_public_url: str
     minio_user: str
     minio_password: str
     minio_bucket: str

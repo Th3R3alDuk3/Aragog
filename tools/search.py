@@ -1,15 +1,19 @@
+from asyncio import Semaphore
+from datetime import date
 from typing import Annotated
 
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from fastmcp.tools import tool
+from haystack import Document, Pipeline
+from haystack.core.errors import PipelineRuntimeError
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from config import get_settings
-from models.enrichment import EnrichedMeta
-from models.results import SearchResult
-from tools._execution import run_search
-from tools._responses import search_response
+from schemas.enrichment import EnrichedMeta
+from schemas.results import SearchResult
+from tools._serializer import search_response
 
 settings = get_settings()
 
@@ -19,212 +23,188 @@ _ENTITY_FIELDS = tuple(
     if field.startswith("ent_")
 )
 
-TopKBefore = Annotated[int, Field(
-    ge=20, le=60,
-    description=(
-        "Number of candidate chunks to retrieve (per retriever) before "
-        "reranking. Defaults to 30."
-    ),
-)]
 
-TopKAfter = Annotated[int, Field(
-    ge=3, le=10,
-    description="Number of chunks to return after reranking. Defaults to 5.",
-)]
+Query = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=800),
+    Field(description="Search query."),
+]
+
+KeywordQuery = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=800),
+    Field(description="Exact names, codes, or terms; use short phrases, not questions."),
+]
+
+
+async def run_search(
+    pipeline: Pipeline,
+    inputs: dict,
+    limiter: Semaphore,
+) -> list[Document]:
+
+    try:
+        async with limiter:
+            result = await pipeline.run_async(inputs)
+    except (PipelineRuntimeError, TimeoutError) as error:
+        raise ToolError(
+            "The retrieval backend timed out or is temporarily unavailable. "
+            "Retry this search in a moment."
+        ) from error
+    return result["reranker"]["documents"]
 
 
 @tool(
     name="keyword_and_semantic_search",
+    title="Keyword + semantic search",
     description=(
-        "Search the knowledge base with semantic (meaning) and keyword "
-        "(exact-term) retrieval fused by the cross-encoder reranker — the "
-        "recommended default; use it unless you specifically need a single "
-        "modality or metadata filters. Decompose complex questions into "
-        "several searches. Returns the top reranked chunks with id, source, "
-        "page, headings, a short snippet and a temporary source URL."
+        "Search the knowledge base by meaning and exact terms at once. The "
+        "default — use it unless you need a single modality or metadata "
+        "filters. Decompose complex questions into several searches. "
+        "Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True),
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    timeout=settings.tool_timeout,
 )
 async def keyword_and_semantic_search(
     ctx: Context,
-    query: Annotated[str, Field(
-        description="A natural language query.",
-    )],
-    top_k_before: TopKBefore = 30,
-    top_k_after: TopKAfter = 5,
+    query: Query,
 ) -> SearchResult:
 
-    minio_store = ctx.lifespan_context["minio_store"]
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
     documents = await run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
-        "dense_retriever": {"top_k": top_k_before},
-        "sparse_retriever": {"top_k": top_k_before},
+        "dense_retriever": {"top_k": settings.search_top_k_before},
+        "sparse_retriever": {"top_k": settings.search_top_k_before},
         "reranker": {
             "query": query,
-            "top_k": top_k_after,
+            "top_k": settings.search_top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
     }, search_limiter)
 
-    return search_response(documents, minio_store)
+    return search_response(documents)
 
 
 @tool(
     name="semantic_search",
+    title="Semantic search",
     description=(
-        "Search the knowledge base by meaning only (dense retrieval + "
-        "cross-encoder reranking) — use when you want pure semantic matching "
-        "rather than the default combined search. Returns the top reranked chunks with "
-        "id, source, page, headings, a short snippet and a temporary source "
-        "URL."
+        "Search by meaning only. Use when the wording varies but the concept "
+        "is stable; otherwise prefer `keyword_and_semantic_search`. "
+        "Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True),
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    timeout=settings.tool_timeout,
 )
 async def semantic_search(
     ctx: Context,
-    query: Annotated[str, Field(
-        description="A natural language query.",
-    )],
-    top_k_before: TopKBefore = 30,
-    top_k_after: TopKAfter = 5,
+    query: Query,
 ) -> SearchResult:
 
-    minio_store = ctx.lifespan_context["minio_store"]
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
     documents = await run_search(dense_pipeline, {
         "embedder": {"text": query},
-        "retriever": {"top_k": top_k_before},
+        "retriever": {"top_k": settings.search_top_k_before},
         "reranker": {
             "query": query,
-            "top_k": top_k_after,
+            "top_k": settings.search_top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
     }, search_limiter)
 
-    return search_response(documents, minio_store)
+    return search_response(documents)
 
 
 @tool(
     name="keyword_search",
+    title="Keyword search",
     description=(
-        "Search the knowledge base by exact terms (sparse/BM25 retrieval + "
-        "cross-encoder reranking) — use for specific keywords, names or codes "
-        "where exact wording matters rather than the default combined search. Returns "
-        "the top reranked chunks with id, source, page, headings, a short "
-        "snippet and a temporary source URL."
+        "Search by exact terms only (BM25). Use for names, codes or domain "
+        "terms where the exact wording matters; otherwise prefer "
+        "`keyword_and_semantic_search`. Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True),
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    timeout=settings.tool_timeout,
 )
 async def keyword_search(
     ctx: Context,
-    query: Annotated[str, Field(
-        description=(
-            "The keywords or exact terms to look up. Use short, specific terms — "
-            "entity names, codes, dates or domain terms (good: 'Siemens AG', "
-            "'Garantiezeit', '2024-03-01'), not full questions or long phrases "
-            "(bad: 'how long is the warranty?' → use 'Garantiezeit', "
-            "'warranty period')."
-        ),
-    )],
-    top_k_before: TopKBefore = 30,
-    top_k_after: TopKAfter = 5,
+    query: KeywordQuery,
 ) -> SearchResult:
 
-    minio_store = ctx.lifespan_context["minio_store"]
     sparse_pipeline = ctx.lifespan_context["sparse_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
     documents = await run_search(sparse_pipeline, {
         "embedder": {"text": query},
-        "retriever": {"top_k": top_k_before},
+        "retriever": {"top_k": settings.search_top_k_before},
         "reranker": {
             "query": query,
-            "top_k": top_k_after,
+            "top_k": settings.search_top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
     }, search_limiter)
 
-    return search_response(documents, minio_store)
+    return search_response(documents)
 
 
 @tool(
     name="filtered_search",
+    title="Filtered search",
     description=(
-        "Search the knowledge base with combined semantic and keyword "
-        "retrieval, restricted by metadata filters — use to constrain "
-        "results by keywords, entities, content "
-        "types or a date range. Combine any of the filters; all given must "
-        "hold. Returns the top reranked chunks with id, source, page, "
-        "headings, a short snippet and a temporary source URL."
+        "Hybrid search restricted by metadata; all supplied filters must match. "
+        "Returns ranked ids and previews; read promising hits with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True),
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    timeout=settings.tool_timeout,
 )
 async def filtered_search(
     ctx: Context,
-    query: Annotated[str, Field(
-        description="A natural language query.",
-    )],
+    query: Query,
     keywords: Annotated[list[str], Field(
-        default_factory=list,
+        default=[],
+        max_length=5,
         description=(
-            "A chunk matches if it carries any of these keywords. Use exact "
-            "domain terms as they appear in the documents (e.g. ['Garantiezeit', "
-            "'Rahmenvertrag']), not full phrases."
+            "Match any enriched keyword. Use known exact terms."
         ),
     )],
     entities: Annotated[list[str], Field(
-        default_factory=list,
+        default=[],
+        max_length=5,
         description=(
-            "A chunk matches if it mentions any of these entities — persons, "
-            "organizations, products or locations (e.g. ['Siemens AG', "
-            "'Angela Merkel', 'Berlin'])."
+            "Match any enriched person, organization, product, or location."
         ),
     )],
     content_types: Annotated[list[str], Field(
-        default_factory=list,
+        default=[],
+        max_length=5,
         description=(
-            "A chunk matches if it contains any of these structural element "
-            "types (e.g. 'table', 'text', 'list_item', 'code', 'formula', "
-            "'picture', 'section_header')."
+            "Match any structural type, e.g. text, table, list_item, or code."
         ),
     )],
-    date_from: Annotated[str, Field(
-        description=(
-            "Earliest date (ISO YYYY-MM-DD) the chunk may refer to. Matches "
-            "chunks mentioning any date on or after it."
-        ),
-    )] = "",
-    date_to: Annotated[str, Field(
-        description=(
-            "Latest date (ISO YYYY-MM-DD) the chunk may refer to. Matches "
-            "chunks mentioning any date on or before it; combined with "
-            "date_from, the two bounds may be satisfied by different dates "
-            "in the same chunk."
-        ),
-    )] = "",
-    modified_from: Annotated[str, Field(
-        description=(
-            "Earliest modification date (ISO YYYY-MM-DD) of the source file "
-            "the chunk comes from."
-        ),
-    )] = "",
-    modified_to: Annotated[str, Field(
-        description=(
-            "Latest modification date (ISO YYYY-MM-DD) of the source file, "
-            "inclusive of the whole day."
-        ),
-    )] = "",
-    top_k_before: TopKBefore = 30,
-    top_k_after: TopKAfter = 5,
+    date_from: Annotated[date | None, Field(
+        default=None,
+        description="Earliest mentioned date, inclusive.",
+    )],
+    date_to: Annotated[date | None, Field(
+        default=None,
+        description="Latest mentioned date, inclusive; bounds may match different dates in one chunk.",
+    )],
+    modified_from: Annotated[date | None, Field(
+        default=None,
+        description="Earliest source modification date, inclusive.",
+    )],
+    modified_to: Annotated[date | None, Field(
+        default=None,
+        description="Latest source modification date, inclusive.",
+    )],
 ) -> SearchResult:
 
-    minio_store = ctx.lifespan_context["minio_store"]
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
@@ -256,28 +236,28 @@ async def filtered_search(
         conditions.append({
             "field": "meta.dates",
             "operator": ">=",
-            "value": date_from,
+            "value": date_from.isoformat(),
         })
 
     if date_to:
         conditions.append({
             "field": "meta.dates",
             "operator": "<=",
-            "value": date_to,
+            "value": date_to.isoformat(),
         })
 
     if modified_from:
         conditions.append({
             "field": "meta.modified_at",
             "operator": ">=",
-            "value": modified_from,
+            "value": modified_from.isoformat(),
         })
 
     if modified_to:
         conditions.append({
             "field": "meta.modified_at",
             "operator": "<=",
-            "value": modified_to if "T" in modified_to else f"{modified_to}T23:59:59",
+            "value": f"{modified_to.isoformat()}T23:59:59",
         })
 
     filters = {
@@ -288,52 +268,56 @@ async def filtered_search(
     documents = await run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
-        "dense_retriever": {"top_k": top_k_before, "filters": filters},
-        "sparse_retriever": {"top_k": top_k_before, "filters": filters},
+        "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
+        "sparse_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
         "reranker": {
             "query": query,
-            "top_k": top_k_after,
+            "top_k": settings.search_top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
     }, search_limiter)
 
-    return search_response(documents, minio_store)
+    return search_response(documents)
 
 
 @tool(
     name="find_related",
+    title="Find related chunks",
     description=(
-        "Find more chunks that mention the same entities (persons, "
-        "organizations, products, locations) as the given chunks — use to "
-        "expand from earlier hits via shared entities (associative "
-        "multi-hop). Ranked against the query by the cross-encoder reranker, "
-        "excluding the given chunks. Returns the top reranked chunks with id, "
-        "source, page, headings, a short snippet and a temporary source URL."
+        "Find further chunks sharing entities (persons, organizations, "
+        "products, locations) with the given ones — associative multi-hop "
+        "from an earlier hit. Ranked against the query, excluding the given "
+        "chunks. Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True),
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    timeout=settings.tool_timeout,
 )
 async def find_related(
     ctx: Context,
     chunk_ids: Annotated[list[str], Field(
+        max_length=2,
         description=(
-            "Chunk ids (from a previous search result) whose entities define "
-            "the expansion."
+            "One or two search-hit ids whose entities define the expansion."
         ),
     )],
-    query: Annotated[str, Field(
-        description="A natural language query the related chunks are ranked against.",
-    )],
-    top_k_before: TopKBefore = 30,
-    top_k_after: TopKAfter = 5,
+    query: Query,
 ) -> SearchResult:
 
     document_store = ctx.lifespan_context["document_store"]
-    minio_store = ctx.lifespan_context["minio_store"]
-    dense_pipeline = ctx.lifespan_context["dense_pipeline"]
+    hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
     seeds = await document_store.filter_documents_async(
         filters={"field": "id", "operator": "in", "value": chunk_ids})
+
+    if not seeds:
+        return SearchResult(
+            hint=(
+                "None of the supplied chunk ids exists. Run a search first, "
+                "then pass ids from its hits."
+            ),
+            hits=[],
+        )
 
     entities = sorted({
         entity
@@ -343,28 +327,35 @@ async def find_related(
     })
 
     if not entities:
-        return search_response([], minio_store)
+        return SearchResult(
+            hint=(
+                "The supplied chunks contain no extracted entities. Choose a "
+                "different hit, or continue with another search instead."
+            ),
+            hits=[],
+        )
 
-    documents = await run_search(dense_pipeline, {
-        "embedder": {"text": query},
-        "retriever": {
-            "top_k": top_k_before,
-            "filters": {
-                "operator": "AND",
-                "conditions": [
-                    {"field": "id", "operator": "not in", "value": chunk_ids},
-                    {"operator": "OR", "conditions": [
-                        {"field": f"meta.{field}", "operator": "in", "value": entities}
-                        for field in _ENTITY_FIELDS
-                    ]},
-                ],
-            },
-        },
+    filters = {
+        "operator": "AND",
+        "conditions": [
+            {"field": "id", "operator": "not in", "value": chunk_ids},
+            {"operator": "OR", "conditions": [
+                {"field": f"meta.{field}", "operator": "in", "value": entities}
+                for field in _ENTITY_FIELDS
+            ]},
+        ],
+    }
+
+    documents = await run_search(hybrid_pipeline, {
+        "dense_embedder": {"text": query},
+        "sparse_embedder": {"text": query},
+        "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
+        "sparse_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
         "reranker": {
             "query": query,
-            "top_k": top_k_after,
+            "top_k": settings.search_top_k_after,
             "score_threshold": settings.reranker_score_threshold,
         },
     }, search_limiter)
 
-    return search_response(documents, minio_store)
+    return search_response(documents)

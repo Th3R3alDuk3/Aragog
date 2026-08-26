@@ -7,7 +7,7 @@
 !index.py
 !server.py
 !components/
-!models/
+!schemas/
 !pipelines/
 !services/
 !tools/

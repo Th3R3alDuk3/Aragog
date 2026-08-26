@@ -13,7 +13,7 @@ from haystack import Pipeline
 from config import get_settings
 from pipelines._factories import build_document_store
 from pipelines.indexing import build_indexing_pipeline
-from services.storage import MinioStore
+from services.minio import MinioStore
 
 
 #-----------------------------------------------------
@@ -82,6 +82,7 @@ async def main():
 
     minio_store = MinioStore(
         settings.minio_url,
+        settings.minio_public_url,
         settings.minio_user,
         settings.minio_password,
         settings.minio_bucket,

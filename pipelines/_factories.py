@@ -19,11 +19,10 @@ from haystack_integrations.components.retrievers.qdrant import (
     QdrantSparseEmbeddingRetriever,
 )
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
-from pydantic import BaseModel
 
 from components.chunker import DoclingHybridChunker
 from config import get_settings
-from models.enrichment import EnrichedMeta
+from schemas.enrichment import EnrichedMeta
 
 settings = get_settings()
 
@@ -66,6 +65,7 @@ def build_converter() -> DoclingServeConverter:
             "ocr_lang": ["en", "fr", "de", "es"],
             "pdf_backend": "docling_parse",
             "table_mode": "accurate",
+            "do_pdf_heading_hierarchy": True,
             "abort_on_error": False,
             "do_code_enrichment": False,
             "do_formula_enrichment": False,
@@ -95,35 +95,6 @@ def build_chunker() -> DoclingHybridChunker:
 #-----------------------------------------------------
 
 
-def build_chat_generator(
-    response_format: type[BaseModel] | None = None,
-) -> OpenAIChatGenerator:
-
-    generation_kwargs = {
-        "temperature": 0,
-        # bounds runaway generations (e.g. greedy repetition loops on local vLLM)
-        "max_completion_tokens": 8192,
-    }
-
-    if response_format is not None:
-        generation_kwargs["response_format"] = response_format
-
-    # api.openai.com rejects unknown request params with 400
-    if "api.openai.com" not in settings.enricher_url:
-        generation_kwargs["extra_body"] = {
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
-
-    return OpenAIChatGenerator(
-        api_base_url=settings.enricher_url,
-        api_key=Secret.from_token(settings.enricher_token),
-        model=settings.enricher_model,
-        timeout=settings.enricher_timeout,
-        max_retries=settings.enricher_max_retries,
-        generation_kwargs=generation_kwargs,
-    )
-
-
 _CHUNK_ENRICHER_PROMPT = """\
 You are a document metadata extraction assistant.
 The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}";
@@ -145,6 +116,20 @@ Content rules for each output field:
 
 
 def build_chunk_enricher() -> LLMMetadataExtractor:
+
+    generation_kwargs = {
+        "temperature": 0,
+        "response_format": EnrichedMeta,
+        # bounds runaway generations (e.g. greedy repetition loops on local vLLM)
+        "max_completion_tokens": 8192,
+    }
+
+    # api.openai.com rejects unknown request params with 400
+    if "api.openai.com" not in settings.enricher_url:
+        generation_kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+
     # vLLM-class backends never show the json_schema descriptions to the model
     field_requirements = "\n".join(
         f"- {name}: {field.description}"
@@ -152,9 +137,17 @@ def build_chunk_enricher() -> LLMMetadataExtractor:
     prompt = (_CHUNK_ENRICHER_PROMPT
         .replace("<<LANGUAGE>>", settings.enricher_language)
         .replace("<<FIELD_REQUIREMENTS>>", field_requirements))
+
     return LLMMetadataExtractor(
         prompt=prompt,
-        chat_generator=build_chat_generator(EnrichedMeta),
+        chat_generator=OpenAIChatGenerator(
+            api_base_url=settings.enricher_url,
+            api_key=Secret.from_token(settings.enricher_token),
+            model=settings.enricher_model,
+            timeout=settings.enricher_timeout,
+            max_retries=settings.enricher_max_retries,
+            generation_kwargs=generation_kwargs,
+        ),
         max_workers=settings.enricher_max_workers,
     )
 

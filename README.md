@@ -37,8 +37,8 @@ docker compose run --rm -v ./mydocs:/docs server python index.py /docs/doc1.pdf
 Indexing is idempotent: chunk ids are deterministic (source, position and
 content), so re-running `index.py` over the same files updates chunks in
 place instead of duplicating them — a failed run can simply be repeated.
-Chunk content changes (an edited file, a changed chunker) get new ids, so
-rebuild the collection then instead of re-indexing over the old one.
+Chunk content changes (an edited file, a changed converter or chunker) get
+new ids, so rebuild the collection then instead of re-indexing over the old one.
 
 Point OpenWebUI's MCP integration at `http://HOST:8000/mcp` (streamable-http) —
 the seven retrieval tools become available to the agent. Give the OpenWebUI
@@ -82,15 +82,15 @@ OpenWebUI →  agent: search → read → reason → answer (cites chunk ids)
 
 | Tool | Purpose |
 |------|---------|
-| `keyword_and_semantic_search(query, top_k_before, top_k_after)` | **Default** — dense + sparse, fused by reranker |
-| `semantic_search(query, top_k_before, top_k_after)` | Dense retrieval (by meaning) + rerank |
-| `keyword_search(query, top_k_before, top_k_after)` | Sparse/BM25 retrieval (exact terms) + rerank |
+| `keyword_and_semantic_search(query)` | **Default** — dense + sparse, fused by reranker |
+| `semantic_search(query)` | Dense retrieval (by meaning) + rerank |
+| `keyword_search(query)` | Sparse/BM25 retrieval (exact terms) + rerank |
 | `filtered_search(query, keywords, entities, content_types, date_from, date_to, …)` | Hybrid (dense + sparse) + metadata filter + rerank |
 | `find_related(chunk_ids, query, …)` | Associative multi-hop — more chunks sharing the hits' entities |
-| `read_chunk(chunk_ids)` | Full content of chunks by id |
+| `read_chunks(chunk_ids)` | Full content of chunks by id |
 | `read_neighbors(chunk_ids, window)` | Full content of the chunks surrounding a hit (document order) |
 
-Each search returns chunk ids + snippets; the agent reads full chunks with `read_chunk`
+Each search returns chunk ids + snippets; the agent reads full chunks with `read_chunks`
 or pulls surrounding context with `read_neighbors`.
 
 ---
@@ -120,18 +120,6 @@ The backing services also bind to `127.0.0.1` — point the service URLs in
 | Docling | 5001 | Document converter |
 | Embedder | 8001 | vLLM dense embedding server (GPU) |
 | Reranker | 8002 | vLLM rerank server (GPU) |
-
-### Retrieval eval
-
-`eval.py` measures retrieval quality against your own indexed documents: it
-samples chunks from the live index, generates one question per chunk with the
-enricher LLM, then scores each retrieval mode by whether the right chunk
-comes back:
-
-```bash
-uv run python eval.py generate -n 50    # golden set from the live index
-uv run python eval.py run               # Recall / MRR / MAP for dense, sparse, hybrid
-```
 
 ---
 

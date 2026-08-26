@@ -1,4 +1,4 @@
-from tools.read import read_chunk, read_neighbors
+from tools.read import read_chunks, read_neighbors
 from tools.search import (
     filtered_search,
     find_related,
@@ -13,6 +13,6 @@ TOOLS = (
     keyword_search,
     filtered_search,
     find_related,
-    read_chunk,
+    read_chunks,
     read_neighbors,
 )
