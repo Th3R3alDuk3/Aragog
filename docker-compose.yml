@@ -1,7 +1,7 @@
 name: aragog
 
 volumes:
-  minio_data:
+  rustfs_data:
   qdrant_data:
 
 x-vllm: &vllm
@@ -31,19 +31,20 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  minio:
-    image: docker.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+  rustfs:
+    image: docker.io/rustfs/rustfs:1.0.0-rc.5
     restart: unless-stopped
     ports:
-      # not loopback: MINIO_URL is embedded in presigned links the browser opens
+      # not loopback: RUSTFS_PUBLIC_URL is embedded in presigned links the browser opens
       - "0.0.0.0:9000:9000"
       - "127.0.0.1:9001:9001"
     volumes:
-      - minio_data:/data
+      - rustfs_data:/data
     environment:
-      MINIO_ROOT_USER: ${MINIO_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD}
-    command: server /data --console-address ":9001"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      # empty: log to stdout instead of a file inside the container
+      RUSTFS_OBS_LOG_DIRECTORY: ""
 
   qdrant:
     image: docker.io/qdrant/qdrant:v1.19.1

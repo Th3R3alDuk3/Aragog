@@ -37,7 +37,7 @@ async def read_chunks(
 ) -> ReadResult:
 
     document_store = ctx.lifespan_context["document_store"]
-    minio_store = ctx.lifespan_context["minio_store"]
+    rustfs_store = ctx.lifespan_context["rustfs_store"]
 
     documents = await document_store.filter_documents_async(
         filters=Filter(must=[FieldCondition(
@@ -45,7 +45,7 @@ async def read_chunks(
             match=MatchAny(any=chunk_ids),
         )]))
 
-    return await read_response(documents, minio_store)
+    return read_response(documents, rustfs_store)
 
 
 @tool(
@@ -79,7 +79,7 @@ async def read_neighbors(
 ) -> ReadResult:
 
     document_store = ctx.lifespan_context["document_store"]
-    minio_store = ctx.lifespan_context["minio_store"]
+    rustfs_store = ctx.lifespan_context["rustfs_store"]
 
     seeds = await document_store.filter_documents_async(
         filters=Filter(must=[FieldCondition(
@@ -87,40 +87,35 @@ async def read_neighbors(
             match=MatchAny(any=chunk_ids),
         )]))
 
+    if not seeds:
+        return read_response([], rustfs_store)
+
     conditions: list[Filter] = []
 
     for seed in seeds:
 
-        index = seed.meta.get("chunk_index")
-        source = seed.meta.get("source")
-        if index is None or source is None:
-            continue
-
-        total_chunks = seed.meta.get("total_chunks", index + window + 1)
+        index = seed.meta["chunk_index"]
         conditions.append(Filter(must=[
             FieldCondition(
                 key="meta.source",
-                match=MatchValue(value=source),
+                match=MatchValue(value=seed.meta["source"]),
             ),
             FieldCondition(
                 key="meta.chunk_index",
                 match=MatchAny(any=[
                     neighbor
                     for neighbor in range(index - window, index + window + 1)
-                    if 0 <= neighbor < total_chunks
+                    if 0 <= neighbor < seed.meta["total_chunks"]
                 ]),
             ),
         ]))
-
-    if not conditions:
-        return await read_response([], minio_store)
 
     neighbors = await document_store.filter_documents_async(
         filters=Filter(should=conditions))
 
     neighbors.sort(key=lambda document: (
-        document.meta.get("source") or "",
-        document.meta.get("chunk_index", 0),
+        document.meta["source"],
+        document.meta["chunk_index"],
     ))
 
-    return await read_response(neighbors, minio_store)
+    return read_response(neighbors, rustfs_store)

@@ -44,19 +44,19 @@ flowchart LR
     AGENT["OpenWebUI agent<br/>search · read · reason · cite"]
 
     DOC --> CHUNK
-    DOC --> MINIO[("MinIO")]
+    DOC --> RUSTFS[("RustFS")]
     EMBED --> QDRANT[("Qdrant")]
     QDRANT --> RETRIEVE
     AGENT -- "tool call" --> RETRIEVE
     RERANK -- "chunk ids + snippets" --> AGENT
-    MINIO -. "presigned links" .-> AGENT
+    RUSTFS -. "presigned links" .-> AGENT
 ```
 
 ---
 
 ## 🚀 Quick Start
 
-One compose file runs the whole stack: MCP server, MinIO, Qdrant, Docling, embedder and
+One compose file runs the whole stack: MCP server, RustFS, Qdrant, Docling, embedder and
 reranker. **Requires** Docker, plus the NVIDIA container toolkit for the bundled embedder
 and reranker. Every endpoint is a plain OpenAI-compatible URL, so pointing
 `DENSE_EMBEDDING_URL` / `RERANKER_URL` at an external service drops both the GPU and those
@@ -77,9 +77,9 @@ working defaults:
 | Variable | Set it to |
 |:---|:---|
 | `ENRICHER_URL`<br>`ENRICHER_MODEL`<br>`ENRICHER_TOKEN` | An OpenAI-compatible endpoint whose model supports structured output (`json_schema`).<br>Preset is OpenRouter + `deepseek/deepseek-v4-flash` — just add your key. |
-| `MINIO_PUBLIC_URL` | The address a **browser** reaches MinIO at, e.g. `http://192.168.1.10:9000`.<br>Source links are presigned for this host. |
+| `RUSTFS_PUBLIC_URL` | The address a **browser** reaches RustFS at, e.g. `http://192.168.1.10:9000`.<br>Source links are presigned for this host. |
 | `JWT_SECRET` | OpenWebUI's own secret key — the server verifies OpenWebUI's JWTs with it. |
-| `MINIO_PASSWORD`<br>`QDRANT_TOKEN`<br>… | Your own passwords (every example says `whatever`). |
+| `RUSTFS_SECRET_KEY`<br>`QDRANT_TOKEN`<br>… | Your own passwords (every example says `whatever`). |
 
 ### 2. Start
 
@@ -89,7 +89,7 @@ docker compose up -d --build
 
 The first start downloads the embedding and reranking models into `./data/huggingface`,
 which takes a while. Name the services you want to skip the bundled ones, e.g.
-`docker compose up -d --build server minio qdrant docling`.
+`docker compose up -d --build server rustfs qdrant docling`.
 
 ### 3. Index documents
 
@@ -143,13 +143,13 @@ hostnames:
 | Variable | Host value |
 |:---|:---|
 | `QDRANT_URL` | `http://localhost:6333` (dashboard at `/dashboard`) |
-| `MINIO_URL` | `http://localhost:9000` (console on 9001) |
+| `RUSTFS_URL` | `http://localhost:9000` (console at `localhost:9001/rustfs/console/`, access/secret key as login) |
 | `DOCLING_URL` | `http://localhost:5001` |
 | `DENSE_EMBEDDING_URL` | `http://localhost:8001/v1` |
 | `RERANKER_URL` | `http://localhost:8002/v1` |
 
 ```bash
-docker compose up -d minio qdrant docling embedder reranker
+docker compose up -d rustfs qdrant docling embedder reranker
 
 uv run python index.py path/to/doc1.pdf     # index documents
 uv run python server.py                     # run the MCP server

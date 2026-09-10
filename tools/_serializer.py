@@ -1,12 +1,7 @@
-from asyncio import gather
-
 from haystack import Document
 
-from config import get_settings
 from schemas.results import ChunkContent, ReadResult, SearchHit, SearchResult
-from services.minio import MinioStore
-
-settings = get_settings()
+from services.rustfs import RustfsStore
 
 
 def _search_hits(
@@ -16,32 +11,28 @@ def _search_hits(
     return [SearchHit(
         id=document.id,
         score=document.score,
-        source=document.meta.get("source"),
+        source=document.meta["source"],
         page=document.meta.get("page_number"),
-        headings=document.meta.get("headings", []),
+        headings=document.meta["headings"],
         snippet=(document.meta.get("context") or document.content or "")[:300],
     ) for document in documents]
 
 
-async def _chunk_contents(
+def _chunk_contents(
     documents: list[Document],
-    minio_store: MinioStore,
+    rustfs_store: RustfsStore,
 ) -> list[ChunkContent]:
-
-    urls = await gather(*[
-        minio_store.presigned_url(
-            document.meta.get("source"), settings.minio_url_expire)
-        for document in documents
-    ])
 
     chunks: list[ChunkContent] = []
 
-    for document, url in zip(documents, urls, strict=True):
+    for document in documents:
 
+        source = document.meta["source"]
+        url = rustfs_store.presigned_url(source)
         page = document.meta.get("page_number")
         chunks.append(ChunkContent(
             id=document.id,
-            source=document.meta.get("source"),
+            source=source,
             # fragment stays client-side, so the presigned signature is unaffected
             url=f"{url}#page={page}" if page else url,
             page=page,
@@ -63,13 +54,13 @@ def search_response(
     )
 
 
-async def read_response(
+def read_response(
     documents: list[Document],
-    minio_store: MinioStore,
+    rustfs_store: RustfsStore,
 ) -> ReadResult:
     return ReadResult(
         hint="" if documents else (
             "No chunks found. Run a search first to get valid chunk ids."
         ),
-        chunks=await _chunk_contents(documents, minio_store),
+        chunks=_chunk_contents(documents, rustfs_store),
     )

@@ -8,7 +8,7 @@ class SearchHit(BaseModel):
     score: float | None = Field(
         description="Rerank score; higher is better.",
     )
-    source: str | None = Field(
+    source: str = Field(
         description="Source filename.",
     )
     page: int | None = Field(
@@ -26,10 +26,10 @@ class ChunkContent(BaseModel):
     id: str = Field(
         description="Chunk id.",
     )
-    source: str | None = Field(
+    source: str = Field(
         description="Source filename.",
     )
-    url: str | None = Field(
+    url: str = Field(
         description=(
             "Temporary source link. Cite verbatim; it expires."
         ),

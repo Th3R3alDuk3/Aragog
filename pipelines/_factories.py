@@ -23,8 +23,26 @@ from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
 from components.chunker import DoclingHybridChunker
 from config import get_settings
 from schemas.enrichment import EnrichedMeta
+from services.rustfs import RustfsStore
 
 settings = get_settings()
+
+
+#-----------------------------------------------------
+# S3 Storage
+#-----------------------------------------------------
+
+
+def build_rustfs_store() -> RustfsStore:
+    return RustfsStore(
+        url=settings.rustfs_url,
+        public_url=settings.rustfs_public_url,
+        access_key=settings.rustfs_access_key,
+        secret_key=settings.rustfs_secret_key,
+        timeout=settings.rustfs_timeout,
+        bucket=settings.rustfs_bucket,
+        url_expire=settings.rustfs_url_expire,
+    )
 
 
 #-----------------------------------------------------
@@ -164,6 +182,8 @@ def build_dense_document_embedder() -> OpenAIDocumentEmbedder:
         model=settings.dense_embedding_model,
         meta_fields_to_embed=settings.embedded_meta_fields.split(","),
         timeout=settings.dense_embedding_timeout,
+        # default logs and passes chunks on without a dense vector
+        raise_on_failure=True,
     )
 
 

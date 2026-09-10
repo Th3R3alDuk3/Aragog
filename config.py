@@ -20,12 +20,13 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_algorithm: str
     # S3 Storage
-    minio_url: str
-    minio_public_url: str
-    minio_user: str
-    minio_password: str
-    minio_bucket: str
-    minio_url_expire: int
+    rustfs_url: str
+    rustfs_public_url: str
+    rustfs_access_key: str
+    rustfs_secret_key: str
+    rustfs_timeout: int
+    rustfs_bucket: str
+    rustfs_url_expire: int
     # Document Store
     qdrant_url: str
     qdrant_token: str

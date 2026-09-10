@@ -43,7 +43,7 @@ KeywordQuery = Annotated[
 ]
 
 
-async def run_search(
+async def _run_search(
     pipeline: Pipeline,
     inputs: dict,
     limiter: Semaphore,
@@ -66,8 +66,9 @@ async def run_search(
     description=(
         "Search the knowledge base by meaning and exact terms at once. The "
         "default — use it unless you need a single modality or metadata "
-        "filters. Decompose complex questions into several searches. "
-        "Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
+        "filters. Decompose complex questions into several searches. Returns "
+        "ranked chunks as ids with a short snippet; read promising ones with "
+        "`read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -80,7 +81,7 @@ async def keyword_and_semantic_search(
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    documents = await run_search(hybrid_pipeline, {
+    documents = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": settings.search_top_k_before},
@@ -100,8 +101,9 @@ async def keyword_and_semantic_search(
     title="Semantic search",
     description=(
         "Search by meaning only. Use when the wording varies but the concept "
-        "is stable; otherwise prefer `keyword_and_semantic_search`. "
-        "Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
+        "is stable; otherwise prefer `keyword_and_semantic_search`. Returns "
+        "ranked chunks as ids with a short snippet; read promising ones with "
+        "`read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -114,7 +116,7 @@ async def semantic_search(
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    documents = await run_search(dense_pipeline, {
+    documents = await _run_search(dense_pipeline, {
         "embedder": {"text": query},
         "retriever": {"top_k": settings.search_top_k_before},
         "reranker": {
@@ -133,7 +135,8 @@ async def semantic_search(
     description=(
         "Search by exact terms only (BM25). Use for names, codes or domain "
         "terms where the exact wording matters; otherwise prefer "
-        "`keyword_and_semantic_search`. Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
+        "`keyword_and_semantic_search`. Returns ranked chunks as ids with a "
+        "short snippet; read promising ones with `read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -146,7 +149,7 @@ async def keyword_search(
     sparse_pipeline = ctx.lifespan_context["sparse_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    documents = await run_search(sparse_pipeline, {
+    documents = await _run_search(sparse_pipeline, {
         "embedder": {"text": query},
         "retriever": {"top_k": settings.search_top_k_before},
         "reranker": {
@@ -164,7 +167,8 @@ async def keyword_search(
     title="Filtered search",
     description=(
         "Hybrid search restricted by metadata; all supplied filters must match. "
-        "Returns ranked ids and previews; read promising hits with `read_chunks`."
+        "Returns ranked chunks as ids with a short snippet; read promising "
+        "ones with `read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -265,7 +269,7 @@ async def filtered_search(
 
     filters = Filter(must=conditions) if conditions else None
 
-    documents = await run_search(hybrid_pipeline, {
+    documents = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
@@ -287,7 +291,8 @@ async def filtered_search(
         "Find further chunks sharing entities (persons, organizations, "
         "products, locations) with the given ones — associative multi-hop "
         "from an earlier hit. Ranked against the query, excluding the given "
-        "chunks. Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
+        "chunks. Returns ranked chunks as ids with a short snippet; read "
+        "promising ones with `read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -352,7 +357,7 @@ async def find_related(
         )],
     )
 
-    documents = await run_search(hybrid_pipeline, {
+    documents = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},

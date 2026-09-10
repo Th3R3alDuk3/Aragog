@@ -10,10 +10,9 @@ from pathlib import Path
 
 from haystack import Pipeline
 
-from config import get_settings
-from pipelines._factories import build_document_store
+from pipelines._factories import build_document_store, build_rustfs_store
 from pipelines.indexing import build_indexing_pipeline
-from services.minio import MinioStore
+from services.rustfs import RustfsStore
 
 
 #-----------------------------------------------------
@@ -22,7 +21,7 @@ from services.minio import MinioStore
 
 
 async def index_batch(
-    minio_store: MinioStore,
+    rustfs_store: RustfsStore,
     indexing_pipeline: Pipeline,
     file_paths: list[Path],
     semaphore: Semaphore,
@@ -35,7 +34,7 @@ async def index_batch(
         try:
 
             for file_path in file_paths:
-                await minio_store.upload(file_path, file_path.name)
+                await rustfs_store.upload(file_path)
 
             result = await indexing_pipeline.run_async({
                 "converter": {
@@ -78,16 +77,10 @@ async def main():
 
     args = parser.parse_args()
 
-    settings = get_settings()
+    if not_files := [str(path) for path in args.file_paths if not path.is_file()]:
+        parser.error(f"not a file: {', '.join(not_files)}")
 
-    minio_store = MinioStore(
-        settings.minio_url,
-        settings.minio_public_url,
-        settings.minio_user,
-        settings.minio_password,
-        settings.minio_bucket,
-    )
-
+    rustfs_store = build_rustfs_store()
     document_store = build_document_store()
     indexing_pipeline = build_indexing_pipeline(document_store)
 
@@ -95,7 +88,7 @@ async def main():
     batches = [list(batch) for batch in batched(args.file_paths, args.batch_size)]
 
     results = await gather(*[
-        index_batch(minio_store, indexing_pipeline, batch, semaphore, batch_num, len(batches))
+        index_batch(rustfs_store, indexing_pipeline, batch, semaphore, batch_num, len(batches))
         for batch_num, batch in enumerate(batches, 1)
     ])
 
