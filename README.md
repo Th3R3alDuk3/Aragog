@@ -125,7 +125,7 @@ search → read → cite workflow.
 | `keyword_and_semantic_search(query)` | **Default** — dense + sparse, fused by reranker |
 | `semantic_search(query)` | Dense retrieval (by meaning) + rerank |
 | `keyword_search(query)` | Sparse/BM25 retrieval (exact terms) + rerank |
-| `filtered_search(query, …)` | Hybrid + filter on keywords, entities, content types, dates |
+| `filtered_search(query, …)` | Hybrid + exact filter on keywords, entities, content types, dates |
 | `find_related(chunk_ids, query, …)` | More chunks mentioning the same entities as a hit |
 | `read_chunks(chunk_ids)` | Full content of chunks by id |
 | `read_neighbors(chunk_ids, window)` | Full content of the chunks surrounding a hit |

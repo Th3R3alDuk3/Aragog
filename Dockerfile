@@ -2,7 +2,7 @@
 # Builder (dependencies via uv)
 #-----------------------------------------------------
 
-FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Runtime
 #-----------------------------------------------------
 
-FROM python:3.14-slim-bookworm
+FROM python:3.14-slim-trixie
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \

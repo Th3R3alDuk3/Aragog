@@ -1,5 +1,5 @@
 from asyncio import Semaphore
-from datetime import date
+from datetime import UTC, date, datetime, time
 from typing import Annotated
 
 from fastmcp import Context
@@ -9,6 +9,12 @@ from haystack import Document, Pipeline
 from haystack.core.errors import PipelineRuntimeError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
+from qdrant_client.http.models import (
+    DatetimeRange,
+    FieldCondition,
+    Filter,
+    MatchAny,
+)
 
 from config import get_settings
 from schemas.enrichment import EnrichedMeta
@@ -63,7 +69,7 @@ async def run_search(
         "filters. Decompose complex questions into several searches. "
         "Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
 )
 async def keyword_and_semantic_search(
@@ -97,7 +103,7 @@ async def keyword_and_semantic_search(
         "is stable; otherwise prefer `keyword_and_semantic_search`. "
         "Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
 )
 async def semantic_search(
@@ -129,7 +135,7 @@ async def semantic_search(
         "terms where the exact wording matters; otherwise prefer "
         "`keyword_and_semantic_search`. Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
 )
 async def keyword_search(
@@ -160,7 +166,7 @@ async def keyword_search(
         "Hybrid search restricted by metadata; all supplied filters must match. "
         "Returns ranked ids and previews; read promising hits with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
 )
 async def filtered_search(
@@ -177,7 +183,7 @@ async def filtered_search(
         default=[],
         max_length=5,
         description=(
-            "Match any enriched person, organization, product, or location."
+            "Match any exact person, organization, product, or location; list name variants."
         ),
     )],
     content_types: Annotated[list[str], Field(
@@ -208,62 +214,56 @@ async def filtered_search(
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    conditions: list[dict] = []
+    conditions: list[FieldCondition | Filter] = []
 
     if keywords:
-        conditions.append({
-            "field": "meta.keywords",
-            "operator": "in",
-            "value": keywords,
-        })
+        conditions.append(FieldCondition(
+            key="meta.keywords",
+            match=MatchAny(any=keywords),
+        ))
 
     if entities:
-        conditions.append({
-            "operator": "OR",
-            "conditions": [{
-                "field": f"meta.{field}", "operator": "in", "value": entities,
-            } for field in _ENTITY_FIELDS],
-        })
+        conditions.append(Filter(should=[
+            FieldCondition(
+                key=f"meta.{field}",
+                match=MatchAny(any=entities),
+            )
+            for field in _ENTITY_FIELDS
+        ]))
 
     if content_types:
-        conditions.append({
-            "field": "meta.content_types",
-            "operator": "in",
-            "value": content_types,
-        })
+        conditions.append(FieldCondition(
+            key="meta.content_types",
+            match=MatchAny(any=content_types),
+        ))
 
     if date_from:
-        conditions.append({
-            "field": "meta.dates",
-            "operator": ">=",
-            "value": date_from.isoformat(),
-        })
+        conditions.append(FieldCondition(
+            key="meta.dates",
+            range=DatetimeRange(gte=date_from),
+        ))
 
     if date_to:
-        conditions.append({
-            "field": "meta.dates",
-            "operator": "<=",
-            "value": date_to.isoformat(),
-        })
+        conditions.append(FieldCondition(
+            key="meta.dates",
+            range=DatetimeRange(lte=date_to),
+        ))
 
     if modified_from:
-        conditions.append({
-            "field": "meta.modified_at",
-            "operator": ">=",
-            "value": modified_from.isoformat(),
-        })
+        conditions.append(FieldCondition(
+            key="meta.modified_at",
+            range=DatetimeRange(gte=datetime.combine(
+                modified_from, time.min, tzinfo=UTC)),
+        ))
 
     if modified_to:
-        conditions.append({
-            "field": "meta.modified_at",
-            "operator": "<=",
-            "value": f"{modified_to.isoformat()}T23:59:59",
-        })
+        conditions.append(FieldCondition(
+            key="meta.modified_at",
+            range=DatetimeRange(lte=datetime.combine(
+                modified_to, time.max, tzinfo=UTC)),
+        ))
 
-    filters = {
-        "operator": "AND",
-        "conditions": conditions,
-    } if conditions else None
+    filters = Filter(must=conditions) if conditions else None
 
     documents = await run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
@@ -289,13 +289,13 @@ async def filtered_search(
         "from an earlier hit. Ranked against the query, excluding the given "
         "chunks. Returns ranked chunks as ids with a short snippet; read promising ones with `read_chunks`."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
 )
 async def find_related(
     ctx: Context,
     chunk_ids: Annotated[list[str], Field(
-        max_length=2,
+        min_length=1, max_length=2,
         description=(
             "One or two search-hit ids whose entities define the expansion."
         ),
@@ -308,7 +308,10 @@ async def find_related(
     search_limiter = ctx.lifespan_context["search_limiter"]
 
     seeds = await document_store.filter_documents_async(
-        filters={"field": "id", "operator": "in", "value": chunk_ids})
+        filters=Filter(must=[FieldCondition(
+            key="id",
+            match=MatchAny(any=chunk_ids),
+        )]))
 
     if not seeds:
         return SearchResult(
@@ -335,16 +338,19 @@ async def find_related(
             hits=[],
         )
 
-    filters = {
-        "operator": "AND",
-        "conditions": [
-            {"field": "id", "operator": "not in", "value": chunk_ids},
-            {"operator": "OR", "conditions": [
-                {"field": f"meta.{field}", "operator": "in", "value": entities}
-                for field in _ENTITY_FIELDS
-            ]},
+    filters = Filter(
+        should=[
+            FieldCondition(
+                key=f"meta.{field}",
+                match=MatchAny(any=entities),
+            )
+            for field in _ENTITY_FIELDS
         ],
-    }
+        must_not=[FieldCondition(
+            key="id",
+            match=MatchAny(any=chunk_ids),
+        )],
+    )
 
     documents = await run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},

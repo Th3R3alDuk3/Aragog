@@ -91,7 +91,7 @@ mcp = FastMCP(
 mcp.add_middleware(RateLimitingMiddleware(
     max_requests_per_second=settings.rate_limit_rps,
     burst_capacity=settings.rate_limit_burst,
-    # OpenWebUI JWTs carry the user in the `id` claim.
+    # OpenWebUI JWTs carry the user in the `id` claim
     get_client_id=lambda context: (
         token.claims.get("id", "anonymous")
         if (token := get_access_token()) else "anonymous"
@@ -107,5 +107,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         transport="http",
-        host_origin_protection=False,
+        # no session state: any replica can serve any request
+        stateless_http=True,
     )

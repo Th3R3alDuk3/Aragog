@@ -4,6 +4,12 @@ from fastmcp import Context
 from fastmcp.tools import tool
 from mcp.types import ToolAnnotations
 from pydantic import Field
+from qdrant_client.http.models import (
+    FieldCondition,
+    Filter,
+    MatchAny,
+    MatchValue,
+)
 
 from config import get_settings
 from schemas.results import ReadResult
@@ -19,13 +25,13 @@ settings = get_settings()
         "Read chunks in full by id (from a search result). Returns the complete "
         "text of each, with its source, page and a temporary link to cite."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
 )
 async def read_chunks(
     ctx: Context,
     chunk_ids: Annotated[list[str], Field(
-        max_length=5,
+        min_length=1, max_length=5,
         description="The chunk ids to read in full. At most 5 search hits.",
     )],
 ) -> ReadResult:
@@ -34,7 +40,10 @@ async def read_chunks(
     minio_store = ctx.lifespan_context["minio_store"]
 
     documents = await document_store.filter_documents_async(
-        filters={"field": "id", "operator": "in", "value": chunk_ids})
+        filters=Filter(must=[FieldCondition(
+            key="id",
+            match=MatchAny(any=chunk_ids),
+        )]))
 
     return await read_response(documents, minio_store)
 
@@ -48,13 +57,13 @@ async def read_chunks(
         "around a promising hit. Returns the complete text of each, with its "
         "source, page and a temporary link to cite."
     ),
-    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
 )
 async def read_neighbors(
     ctx: Context,
     chunk_ids: Annotated[list[str], Field(
-        max_length=3,
+        min_length=1, max_length=3,
         description=(
             "The chunk ids (from a search result) to read the surrounding "
             "context of. At most 3; call again for more."
@@ -73,34 +82,41 @@ async def read_neighbors(
     minio_store = ctx.lifespan_context["minio_store"]
 
     seeds = await document_store.filter_documents_async(
-        filters={"field": "id", "operator": "in", "value": chunk_ids})
+        filters=Filter(must=[FieldCondition(
+            key="id",
+            match=MatchAny(any=chunk_ids),
+        )]))
 
-    conditions: list[dict] = []
+    conditions: list[Filter] = []
 
     for seed in seeds:
 
         index = seed.meta.get("chunk_index")
-        if index is None:
+        source = seed.meta.get("source")
+        if index is None or source is None:
             continue
 
         total_chunks = seed.meta.get("total_chunks", index + window + 1)
-        conditions.append({
-            "operator": "AND",
-            "conditions": [
-                {"field": "meta.source", "operator": "==", "value": seed.meta.get("source")},
-                {"field": "meta.chunk_index", "operator": "in", "value": [
+        conditions.append(Filter(must=[
+            FieldCondition(
+                key="meta.source",
+                match=MatchValue(value=source),
+            ),
+            FieldCondition(
+                key="meta.chunk_index",
+                match=MatchAny(any=[
                     neighbor
                     for neighbor in range(index - window, index + window + 1)
                     if 0 <= neighbor < total_chunks
-                ]},
-            ],
-        })
+                ]),
+            ),
+        ]))
 
     if not conditions:
         return await read_response([], minio_store)
 
     neighbors = await document_store.filter_documents_async(
-        filters={"operator": "OR", "conditions": conditions})
+        filters=Filter(should=conditions))
 
     neighbors.sort(key=lambda document: (
         document.meta.get("source") or "",
