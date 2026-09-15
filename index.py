@@ -92,6 +92,9 @@ async def main():
         for batch_num, batch in enumerate(batches, 1)
     ])
 
+    await indexing_pipeline.close_async()
+    await document_store.close_async()
+
     if not all(results):
         raise SystemExit(1)
 

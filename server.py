@@ -41,18 +41,26 @@ settings = get_settings()
 async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     document_store = build_document_store()
+    dense_pipeline = build_dense_retrieval_pipeline(document_store)
+    sparse_pipeline = build_sparse_retrieval_pipeline(document_store)
+    hybrid_pipeline = build_hybrid_retrieval_pipeline(document_store)
 
     try:
         yield {
             "document_store": document_store,
             "rustfs_store": build_rustfs_store(),
-            "dense_pipeline": build_dense_retrieval_pipeline(document_store),
-            "sparse_pipeline": build_sparse_retrieval_pipeline(document_store),
-            "hybrid_pipeline": build_hybrid_retrieval_pipeline(document_store),
+            "dense_pipeline": dense_pipeline,
+            "sparse_pipeline": sparse_pipeline,
+            "hybrid_pipeline": hybrid_pipeline,
             "search_limiter": Semaphore(settings.search_max_concurrency),
         }
     finally:
+
         await document_store.close_async()
+        # releases the embedder and reranker http clients
+        await dense_pipeline.close_async()
+        await sparse_pipeline.close_async()
+        await hybrid_pipeline.close_async()
 
 
 INSTRUCTIONS = """\
@@ -69,15 +77,13 @@ you need its surrounding context. Decompose complex questions and search in seve
 rounds. Ground every answer strictly in the retrieved chunks and cite their ids.
 """.strip()
 
-auth = JWTVerifier(
-    public_key=settings.jwt_secret,
-    algorithm=settings.jwt_algorithm,
-)
-
 mcp = FastMCP(
     name="A-RAG-OG",
     instructions=INSTRUCTIONS,
-    auth=auth,
+    auth=JWTVerifier(
+        public_key=settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    ),
     lifespan=lifespan,
 )
 

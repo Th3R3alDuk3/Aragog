@@ -1,3 +1,5 @@
+from typing import cast
+
 from haystack import Document
 
 from schemas.results import ChunkContent, ReadResult, SearchHit, SearchResult
@@ -10,7 +12,8 @@ def _search_hits(
     # no url: the agent must read a chunk before it may cite one
     return [SearchHit(
         id=document.id,
-        score=document.score,
+        # reranked, so never None despite haystack's optional type
+        score=cast(float, document.score),
         source=document.meta["source"],
         page=document.meta.get("page_number"),
         headings=document.meta["headings"],
@@ -44,12 +47,13 @@ def _chunk_contents(
 
 def search_response(
     documents: list[Document],
+    no_match_hint: str = (
+        "No matches. Reformulate or broaden the query and search again. Use "
+        "`filtered_search` only when you have reliable metadata to narrow by."
+    ),
 ) -> SearchResult:
     return SearchResult(
-        hint="" if documents else (
-            "No matches. Reformulate or broaden the query and search again. Use "
-            "`filtered_search` only when you have reliable metadata to narrow by."
-        ),
+        hint="" if documents else no_match_hint,
         hits=_search_hits(documents),
     )
 

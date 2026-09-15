@@ -5,6 +5,7 @@ from fastmcp.tools import tool
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from qdrant_client.http.models import (
+    Condition,
     FieldCondition,
     Filter,
     MatchAny,
@@ -90,7 +91,7 @@ async def read_neighbors(
     if not seeds:
         return read_response([], rustfs_store)
 
-    conditions: list[Filter] = []
+    conditions: list[Condition] = []
 
     for seed in seeds:
 

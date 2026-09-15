@@ -23,6 +23,9 @@ services:
   server:
     build: .
     restart: unless-stopped
+    depends_on:
+      - rustfs
+      - qdrant
     ports:
       - "8000:8000"
     env_file: .env
@@ -32,7 +35,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   rustfs:
-    image: docker.io/rustfs/rustfs:1.0.0-rc.5
+    image: docker.io/rustfs/rustfs:1.0.0-rc.6
     restart: unless-stopped
     ports:
       # not loopback: RUSTFS_PUBLIC_URL is embedded in presigned links the browser opens

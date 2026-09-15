@@ -50,7 +50,7 @@ class DoclingHybridChunker:
 
                 all_chunks.append(Document(
                     id=sha256(
-                        f"{document.meta.get('source')}:{chunk_index}:{content}".encode()
+                        f"{document.meta['source']}:{chunk_index}:{content}".encode()
                     ).hexdigest(),
                     content=content,
                     meta={

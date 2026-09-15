@@ -5,7 +5,7 @@ class SearchHit(BaseModel):
     id: str = Field(
         description="Use with read_chunks.",
     )
-    score: float | None = Field(
+    score: float = Field(
         description="Rerank score; higher is better.",
     )
     source: str = Field(

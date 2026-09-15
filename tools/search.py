@@ -10,6 +10,7 @@ from haystack.core.errors import PipelineRuntimeError
 from mcp.types import ToolAnnotations
 from pydantic import Field, StringConstraints
 from qdrant_client.http.models import (
+    Condition,
     DatetimeRange,
     FieldCondition,
     Filter,
@@ -36,28 +37,26 @@ Query = Annotated[
     Field(description="Search query."),
 ]
 
-KeywordQuery = Annotated[
-    str,
-    StringConstraints(strip_whitespace=True, min_length=1, max_length=800),
-    Field(description="Exact names, codes, or terms; use short phrases, not questions."),
-]
-
 
 async def _run_search(
     pipeline: Pipeline,
     inputs: dict,
     limiter: Semaphore,
-) -> list[Document]:
+) -> tuple[list[Document], int]:
 
     try:
         async with limiter:
-            result = await pipeline.run_async(inputs)
+            # the reranker's input: `joiner` in the hybrid pipeline, `retriever` otherwise
+            result = await pipeline.run_async(
+                inputs, include_outputs_from={"joiner", "retriever"})
     except (PipelineRuntimeError, TimeoutError) as error:
         raise ToolError(
             "The retrieval backend timed out or is temporarily unavailable. "
             "Retry this search in a moment."
         ) from error
-    return result["reranker"]["documents"]
+
+    candidates = (result.get("joiner") or result["retriever"])["documents"]
+    return result["reranker"]["documents"], len(candidates)
 
 
 @tool(
@@ -81,7 +80,7 @@ async def keyword_and_semantic_search(
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    documents = await _run_search(hybrid_pipeline, {
+    documents, _ = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": settings.search_top_k_before},
@@ -116,7 +115,7 @@ async def semantic_search(
     dense_pipeline = ctx.lifespan_context["dense_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    documents = await _run_search(dense_pipeline, {
+    documents, _ = await _run_search(dense_pipeline, {
         "embedder": {"text": query},
         "retriever": {"top_k": settings.search_top_k_before},
         "reranker": {
@@ -143,13 +142,15 @@ async def semantic_search(
 )
 async def keyword_search(
     ctx: Context,
-    query: KeywordQuery,
+    query: Annotated[Query, Field(
+        description="Exact names, codes, or terms; use short phrases, not questions.",
+    )],
 ) -> SearchResult:
 
     sparse_pipeline = ctx.lifespan_context["sparse_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    documents = await _run_search(sparse_pipeline, {
+    documents, _ = await _run_search(sparse_pipeline, {
         "embedder": {"text": query},
         "retriever": {"top_k": settings.search_top_k_before},
         "reranker": {
@@ -218,7 +219,7 @@ async def filtered_search(
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    conditions: list[FieldCondition | Filter] = []
+    conditions: list[Condition] = []
 
     if keywords:
         conditions.append(FieldCondition(
@@ -269,7 +270,7 @@ async def filtered_search(
 
     filters = Filter(must=conditions) if conditions else None
 
-    documents = await _run_search(hybrid_pipeline, {
+    documents, candidates = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
@@ -281,7 +282,16 @@ async def filtered_search(
         },
     }, search_limiter)
 
-    return search_response(documents)
+    if filters is None:
+        return search_response(documents)
+
+    return search_response(documents, no_match_hint=(
+        "No chunk matches the filters. Use values exactly as they appear in "
+        "earlier hits, or drop some filters."
+        if candidates == 0 else
+        f"{candidates} chunk(s) match the filters, but none is relevant enough "
+        "to the query. Rephrase the query or relax the filters."
+    ))
 
 
 @tool(
@@ -357,7 +367,7 @@ async def find_related(
         )],
     )
 
-    documents = await _run_search(hybrid_pipeline, {
+    documents, candidates = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
         "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
@@ -369,4 +379,9 @@ async def find_related(
         },
     }, search_limiter)
 
-    return search_response(documents)
+    return search_response(documents, no_match_hint=(
+        "No other chunk mentions these entities. Continue with another search."
+        if candidates == 0 else
+        f"{candidates} chunk(s) mention the same entities, but none is relevant "
+        "enough to the query. Rephrase the query toward what they would say."
+    ))
