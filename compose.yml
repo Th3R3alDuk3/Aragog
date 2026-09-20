@@ -35,7 +35,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   rustfs:
-    image: docker.io/rustfs/rustfs:1.0.0-rc.6
+    image: docker.io/rustfs/rustfs:1.0.0
     restart: unless-stopped
     ports:
       # not loopback: RUSTFS_PUBLIC_URL is embedded in presigned links the browser opens
@@ -62,7 +62,7 @@ services:
       QDRANT__SERVICE__API_KEY: ${QDRANT_TOKEN}
 
   docling:
-    image: quay.io/docling-project/docling-serve:v1.32.0
+    image: quay.io/docling-project/docling-serve:v1.34.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:5001:5001"
