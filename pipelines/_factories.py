@@ -79,7 +79,7 @@ def build_converter() -> DoclingServeConverter:
             "pipeline": "standard",
             "do_ocr": True,
             "force_ocr": False,
-            "ocr_engine": "auto",
+            "ocr_preset": "auto",
             "ocr_lang": ["en", "fr", "de", "es"],
             "pdf_backend": "docling_parse",
             "table_mode": "accurate",
@@ -138,7 +138,7 @@ def build_chunk_enricher() -> LLMMetadataExtractor:
     generation_kwargs = {
         "temperature": 0,
         "response_format": EnrichedMeta,
-        # bounds runaway generations (e.g. greedy repetition loops on local vLLM)
+        # bounds runaway generations
         "max_completion_tokens": 8192,
     }
 
@@ -148,7 +148,7 @@ def build_chunk_enricher() -> LLMMetadataExtractor:
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
-    # vLLM-class backends never show the json_schema descriptions to the model
+    # vLLM-class backends never show schema descriptions to the model
     field_requirements = "\n".join(
         f"- {name}: {field.description}"
         for name, field in EnrichedMeta.model_fields.items())
@@ -182,7 +182,7 @@ def build_dense_document_embedder() -> OpenAIDocumentEmbedder:
         model=settings.dense_embedding_model,
         meta_fields_to_embed=settings.embedded_meta_fields.split(","),
         timeout=settings.dense_embedding_timeout,
-        # default logs and passes chunks on without a dense vector
+        # default passes failed chunks on without a vector
         raise_on_failure=True,
     )
 
@@ -193,6 +193,8 @@ def build_dense_text_embedder() -> OpenAITextEmbedder:
         api_key=Secret.from_token(settings.dense_embedding_token),
         model=settings.dense_embedding_model,
         timeout=settings.dense_embedding_timeout,
+        # the agent retries, not the server
+        max_retries=0,
     )
 
 
@@ -227,6 +229,7 @@ def build_dense_embedding_retriever(
 ) -> QdrantEmbeddingRetriever:
     return QdrantEmbeddingRetriever(
         document_store=document_store,
+        top_k=settings.search_top_k_before,
     )
 
 
@@ -235,6 +238,7 @@ def build_sparse_embedding_retriever(
 ) -> QdrantSparseEmbeddingRetriever:
     return QdrantSparseEmbeddingRetriever(
         document_store=document_store,
+        top_k=settings.search_top_k_before,
     )
 
 
@@ -248,7 +252,7 @@ def build_reranker() -> VLLMRanker:
         api_base_url=settings.reranker_url,
         api_key=Secret.from_token(settings.reranker_token),
         model=settings.reranker_model,
-        http_client_kwargs={
-            "timeout": settings.reranker_timeout
-        },
+        top_k=settings.search_top_k_after,
+        score_threshold=settings.reranker_score_threshold,
+        http_client_kwargs={"timeout": settings.reranker_timeout},
     )

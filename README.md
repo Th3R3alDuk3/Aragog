@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.14-E09B0A?style=flat-square&logo=python&logoColor=white" alt="Python 3.14">
+  <img src="https://img.shields.io/badge/python-3.13-E09B0A?style=flat-square&logo=python&logoColor=white" alt="Python 3.13">
   <img src="https://img.shields.io/badge/MCP-streamable--http-F97316?style=flat-square" alt="MCP streamable-http">
   <img src="https://img.shields.io/badge/self--hosted-docker%20compose-8B4A2B?style=flat-square&logo=docker&logoColor=white" alt="Self-hosted via Docker Compose">
   <img src="https://img.shields.io/badge/license-MIT-1C1917?style=flat-square" alt="MIT license">
@@ -22,7 +22,8 @@
 A-RAG-OG indexes documents into a single hybrid (dense + sparse) Qdrant store and exposes
 retrieval as MCP tools. The agent lives in OpenWebUI — its model decides which tool to call,
 searches in several rounds, reads promising chunks and grounds its answer. This service
-stays a thin, stateless retrieval layer.
+stays a thin, stateless retrieval layer. Off grid means it: every bundled service runs with
+telemetry and update checks switched off.
 
 Enrichment adds context, keywords, hypothetical questions, entities and dates to every
 chunk — the metadata `filtered_search` filters on.
@@ -36,7 +37,7 @@ flowchart LR
         CHUNK["Docling<br/>HybridChunker"] --> ENRICH["LLM<br/>enrichment"] --> EMBED["dense + sparse<br/>embedding"]
     end
 
-    subgraph srv ["server.py · MCP"]
+    subgraph srv ["app.py · MCP"]
         direction LR
         RETRIEVE["hybrid<br/>retrieval"] --> RERANK["cross-encoder<br/>rerank"]
     end
@@ -127,7 +128,7 @@ search → read → cite workflow.
 | `keyword_search(query)` | Sparse/BM25 retrieval (exact terms) + rerank |
 | `filtered_search(query, …)` | Hybrid + exact filter on keywords, entities, content types, dates |
 | `find_related(chunk_ids, query, …)` | More chunks mentioning the same entities as a hit |
-| `read_chunks(chunk_ids)` | Full content of chunks by id |
+| `read_chunks(chunk_ids)` | Full content of chunks by id, with their keywords, entities and dates for `filtered_search` |
 | `read_neighbors(chunk_ids, window)` | Full content of the chunks surrounding a hit |
 
 Searches return chunk ids with snippets — the agent picks from those and reads on.
@@ -136,7 +137,7 @@ Searches return chunk ids with snippets — the agent picks from those and reads
 
 ## 🛠️ Development
 
-Needs `uv` and Python 3.14. Run the backing services in Docker and the server on the host —
+Needs `uv` and Python 3.13. Run the backing services in Docker and the server on the host —
 they are published locally, so first point `.env` at localhost instead of the compose
 hostnames:
 
@@ -151,8 +152,8 @@ hostnames:
 ```bash
 docker compose up -d rustfs qdrant docling embedder reranker
 
-uv run python index.py path/to/doc1.pdf     # index documents
-uv run python server.py                     # run the MCP server
+uv run --env-file .env python index.py path/to/doc1.pdf     # index documents
+uv run --env-file .env python app.py                        # run the MCP server
 ```
 
 ---

@@ -3,9 +3,9 @@
 !pyproject.toml
 !uv.lock
 
+!app.py
 !config.py
 !index.py
-!server.py
 !components/
 !schemas/
 !pipelines/

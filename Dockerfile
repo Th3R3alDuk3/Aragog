@@ -2,7 +2,7 @@
 # Builder (dependencies via uv)
 #-----------------------------------------------------
 
-FROM ghcr.io/astral-sh/uv:python3.14-trixie-slim AS builder
+FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Runtime
 #-----------------------------------------------------
 
-FROM python:3.14-slim-trixie
+FROM python:3.13-slim-trixie
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 \
@@ -26,7 +26,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder /app/.venv .venv
-COPY server.py index.py config.py ./
+COPY app.py index.py config.py ./
 COPY components ./components
 COPY schemas ./schemas
 COPY pipelines ./pipelines
@@ -37,4 +37,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["python3", "server.py"]
+CMD ["python3", "app.py"]

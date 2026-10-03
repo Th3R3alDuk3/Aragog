@@ -63,5 +63,6 @@ class DoclingHybridChunker:
                     },
                 ))
 
-        logger.info(f"DoclingHybridChunker: {len(documents)} doc(s) → {len(all_chunks)} chunk(s)")
+        logger.info(f"DoclingHybridChunker: {len(documents)} doc(s) "
+            f"→ {len(all_chunks)} chunk(s)")
         return {"documents": all_chunks}

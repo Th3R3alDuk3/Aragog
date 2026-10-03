@@ -15,25 +15,20 @@ from pipelines._factories import (
 def build_indexing_pipeline(
     document_store: QdrantDocumentStore,
 ) -> Pipeline:
-
-    pipeline = Pipeline()
-    pipeline.add_component("converter",
-        build_converter())
-    pipeline.add_component("chunker",
-        build_chunker())
-    pipeline.add_component("chunk_enricher",
-        build_chunk_enricher())
-    pipeline.add_component("dense_embedder",
-        build_dense_document_embedder())
-    pipeline.add_component("sparse_embedder",
-        build_sparse_document_embedder())
-    pipeline.add_component("writer",
-        DocumentWriter(document_store=document_store, policy=DuplicatePolicy.OVERWRITE))
-
-    pipeline.connect("converter.documents", "chunker.documents")
-    pipeline.connect("chunker.documents", "chunk_enricher.documents")
-    pipeline.connect("chunk_enricher.documents", "dense_embedder.documents")
-    pipeline.connect("dense_embedder.documents", "sparse_embedder.documents")
-    pipeline.connect("sparse_embedder.documents", "writer.documents")
-
-    return pipeline
+    return Pipeline().add_components({
+        "converter": build_converter(),
+        "chunker": build_chunker(),
+        "chunk_enricher": build_chunk_enricher(),
+        "dense_embedder": build_dense_document_embedder(),
+        "sparse_embedder": build_sparse_document_embedder(),
+        "writer": DocumentWriter(
+            document_store=document_store,
+            policy=DuplicatePolicy.OVERWRITE,
+        ),
+    }).connect_many([
+        ("converter.documents", "chunker.documents"),
+        ("chunker.documents", "chunk_enricher.documents"),
+        ("chunk_enricher.documents", "dense_embedder.documents"),
+        ("dense_embedder.documents", "sparse_embedder.documents"),
+        ("sparse_embedder.documents", "writer.documents"),
+    ])

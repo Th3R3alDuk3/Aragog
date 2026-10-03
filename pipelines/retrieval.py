@@ -14,61 +14,43 @@ from pipelines._factories import (
 def build_dense_retrieval_pipeline(
     document_store: QdrantDocumentStore,
 ) -> Pipeline:
-
-    pipeline = Pipeline()
-    pipeline.add_component("embedder",
-        build_dense_text_embedder())
-    pipeline.add_component("retriever",
-        build_dense_embedding_retriever(document_store))
-    pipeline.add_component("reranker",
-        build_reranker())
-
-    pipeline.connect("embedder.embedding", "retriever.query_embedding")
-    pipeline.connect("retriever.documents", "reranker.documents")
-
-    return pipeline
+    return Pipeline().add_components({
+        "embedder": build_dense_text_embedder(),
+        "retriever": build_dense_embedding_retriever(document_store),
+        "reranker": build_reranker(),
+    }).connect_many([
+        ("embedder.embedding", "retriever.query_embedding"),
+        ("retriever.documents", "reranker.documents"),
+    ])
 
 
 def build_sparse_retrieval_pipeline(
     document_store: QdrantDocumentStore,
 ) -> Pipeline:
-
-    pipeline = Pipeline()
-    pipeline.add_component("embedder",
-        build_sparse_text_embedder())
-    pipeline.add_component("retriever",
-        build_sparse_embedding_retriever(document_store))
-    pipeline.add_component("reranker",
-        build_reranker())
-
-    pipeline.connect("embedder.sparse_embedding", "retriever.query_sparse_embedding")
-    pipeline.connect("retriever.documents", "reranker.documents")
-
-    return pipeline
+    return Pipeline().add_components({
+        "embedder": build_sparse_text_embedder(),
+        "retriever": build_sparse_embedding_retriever(document_store),
+        "reranker": build_reranker(),
+    }).connect_many([
+        ("embedder.sparse_embedding", "retriever.query_sparse_embedding"),
+        ("retriever.documents", "reranker.documents"),
+    ])
 
 
 def build_hybrid_retrieval_pipeline(
     document_store: QdrantDocumentStore,
 ) -> Pipeline:
-
-    pipeline = Pipeline()
-    pipeline.add_component("dense_embedder",
-        build_dense_text_embedder())
-    pipeline.add_component("sparse_embedder",
-        build_sparse_text_embedder())
-    pipeline.add_component("dense_retriever",
-        build_dense_embedding_retriever(document_store))
-    pipeline.add_component("sparse_retriever",
-        build_sparse_embedding_retriever(document_store))
-    pipeline.add_component("joiner",
-        DocumentJoiner(join_mode="concatenate"))
-    pipeline.add_component("reranker",
-        build_reranker())
-
-    pipeline.connect("dense_embedder.embedding", "dense_retriever.query_embedding")
-    pipeline.connect("sparse_embedder.sparse_embedding", "sparse_retriever.query_sparse_embedding")
-    pipeline.connect("dense_retriever.documents", "joiner.documents")
-    pipeline.connect("sparse_retriever.documents", "joiner.documents")
-    pipeline.connect("joiner.documents", "reranker.documents")
-
-    return pipeline
+    return Pipeline().add_components({
+        "dense_embedder": build_dense_text_embedder(),
+        "sparse_embedder": build_sparse_text_embedder(),
+        "dense_retriever": build_dense_embedding_retriever(document_store),
+        "sparse_retriever": build_sparse_embedding_retriever(document_store),
+        "joiner": DocumentJoiner(join_mode="concatenate"),
+        "reranker": build_reranker(),
+    }).connect_many([
+        ("dense_embedder.embedding", "dense_retriever.query_embedding"),
+        ("sparse_embedder.sparse_embedding", "sparse_retriever.query_sparse_embedding"),
+        ("dense_retriever.documents", "joiner.documents"),
+        ("sparse_retriever.documents", "joiner.documents"),
+        ("joiner.documents", "reranker.documents"),
+    ])

@@ -1,20 +1,7 @@
 from pydantic import BaseModel, Field
 
 
-class EnrichedMeta(BaseModel):
-    context: str = Field(
-        default="",
-        description=(
-            "2-3 full sentences that situate this chunk within the overall "
-            "document AND state its key point: use the document title and the "
-            "heading path at the start of the chunk to name what the chunk is "
-            "about, then summarize what the chunk actually says (e.g. 'This "
-            "section of the Product X manual covers the warranty: 24 months "
-            "from delivery, wearing parts excluded.'). Do not simply repeat the "
-            "heading or title — write complete sentences describing the "
-            "chunk's content."
-        ),
-    )
+class FilterMeta(BaseModel):
     keywords: list[str] = Field(
         default=[],
         description=(
@@ -25,15 +12,6 @@ class EnrichedMeta(BaseModel):
             "and acronyms include both the short and the expanded form "
             "(e.g. ['AGB', 'Allgemeine Geschäftsbedingungen']). Never full "
             "sentences. Empty list if none stand out."
-        ),
-    )
-    hypothetical_questions: list[str] = Field(
-        default=[],
-        description=(
-            "2-3 distinct questions a user might ask that this chunk "
-            "directly answers, phrased naturally as a real query (e.g. "
-            "['Wie lange gilt die Garantie auf Produkt X?']). Empty list if "
-            "the chunk answers no clear question."
         ),
     )
     dates: list[str] = Field(
@@ -56,8 +34,8 @@ class EnrichedMeta(BaseModel):
     ent_organizations: list[str] = Field(
         default=[],
         description=(
-            "Organizations mentioned in this chunk — companies, agencies, institutions. "
-            "Always use the most complete name the chunk provides "
+            "Organizations mentioned in this chunk — companies, agencies, "
+            "institutions. Always use the most complete name the chunk provides "
             "(e.g. ['Siemens AG'], not ['Siemens']), so the same organization "
             "gets the same string in every chunk. Empty list if none."
         ),
@@ -79,3 +57,34 @@ class EnrichedMeta(BaseModel):
             "not ['Bayerns']). Empty list if none."
         ),
     )
+
+
+class EnrichedMeta(FilterMeta):
+    context: str = Field(
+        default="",
+        description=(
+            "2-3 full sentences that situate this chunk within the overall "
+            "document AND state its key point: use the document title and the "
+            "heading path at the start of the chunk to name what the chunk is "
+            "about, then summarize what the chunk actually says (e.g. 'This "
+            "section of the Product X manual covers the warranty: 24 months "
+            "from delivery, wearing parts excluded.'). Do not simply repeat the "
+            "heading or title — write complete sentences describing the "
+            "chunk's content."
+        ),
+    )
+    hypothetical_questions: list[str] = Field(
+        default=[],
+        description=(
+            "2-3 distinct questions a user might ask that this chunk "
+            "directly answers, phrased naturally as a real query (e.g. "
+            "['Wie lange gilt die Garantie auf Produkt X?']). Empty list if "
+            "the chunk answers no clear question."
+        ),
+    )
+
+
+ENTITY_FIELDS = tuple(
+    field for field in FilterMeta.model_fields
+    if field.startswith("ent_")
+)

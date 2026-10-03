@@ -1,6 +1,6 @@
 from asyncio import Semaphore
 from datetime import UTC, date, datetime, time
-from typing import Annotated
+from typing import Annotated, cast
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
@@ -18,17 +18,10 @@ from qdrant_client.http.models import (
 )
 
 from config import get_settings
-from schemas.enrichment import EnrichedMeta
-from schemas.results import SearchResult
-from tools._serializer import search_response
+from schemas.enrichment import ENTITY_FIELDS
+from schemas.results import SearchHit, SearchResult
 
 settings = get_settings()
-
-
-_ENTITY_FIELDS = tuple(
-    field for field in EnrichedMeta.model_fields
-    if field.startswith("ent_")
-)
 
 
 Query = Annotated[
@@ -46,10 +39,10 @@ async def _run_search(
 
     try:
         async with limiter:
-            # the reranker's input: `joiner` in the hybrid pipeline, `retriever` otherwise
+            # reranker input: `joiner` when hybrid, `retriever` otherwise
             result = await pipeline.run_async(
                 inputs, include_outputs_from={"joiner", "retriever"})
-    except (PipelineRuntimeError, TimeoutError) as error:
+    except PipelineRuntimeError as error:
         raise ToolError(
             "The retrieval backend timed out or is temporarily unavailable. "
             "Retry this search in a moment."
@@ -57,6 +50,29 @@ async def _run_search(
 
     candidates = (result.get("joiner") or result["retriever"])["documents"]
     return result["reranker"]["documents"], len(candidates)
+
+
+def _search_response(
+    documents: list[Document],
+    no_match_hint: str = (
+        "No matches. Reformulate or broaden the query once more; if the topic "
+        "is likely outside the knowledge base, say so instead of searching "
+        "again. Use `filtered_search` only with metadata from chunks you read."
+    ),
+) -> SearchResult:
+    # no url: the agent must read a chunk before it may cite one
+    return SearchResult(
+        hint="" if documents else no_match_hint,
+        hits=[SearchHit(
+            id=document.id,
+            # reranked, so never None
+            score=cast(float, document.score),
+            source=document.meta["source"],
+            page=document.meta.get("page_number"),
+            headings=document.meta["headings"],
+            snippet=(document.meta.get("context") or document.content or "")[:300],
+        ) for document in documents],
+    )
 
 
 @tool(
@@ -83,16 +99,10 @@ async def keyword_and_semantic_search(
     documents, _ = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
-        "dense_retriever": {"top_k": settings.search_top_k_before},
-        "sparse_retriever": {"top_k": settings.search_top_k_before},
-        "reranker": {
-            "query": query,
-            "top_k": settings.search_top_k_after,
-            "score_threshold": settings.reranker_score_threshold,
-        },
+        "reranker": {"query": query},
     }, search_limiter)
 
-    return search_response(documents)
+    return _search_response(documents)
 
 
 @tool(
@@ -117,15 +127,10 @@ async def semantic_search(
 
     documents, _ = await _run_search(dense_pipeline, {
         "embedder": {"text": query},
-        "retriever": {"top_k": settings.search_top_k_before},
-        "reranker": {
-            "query": query,
-            "top_k": settings.search_top_k_after,
-            "score_threshold": settings.reranker_score_threshold,
-        },
+        "reranker": {"query": query},
     }, search_limiter)
 
-    return search_response(documents)
+    return _search_response(documents)
 
 
 @tool(
@@ -143,7 +148,11 @@ async def semantic_search(
 async def keyword_search(
     ctx: Context,
     query: Annotated[Query, Field(
-        description="Exact names, codes, or terms; use short phrases, not questions.",
+        description=(
+            "Exact names, codes, or terms in "
+            f"{settings.sparse_embedding_language.title()}; use short phrases, "
+            "not questions."
+        ),
     )],
 ) -> SearchResult:
 
@@ -152,24 +161,20 @@ async def keyword_search(
 
     documents, _ = await _run_search(sparse_pipeline, {
         "embedder": {"text": query},
-        "retriever": {"top_k": settings.search_top_k_before},
-        "reranker": {
-            "query": query,
-            "top_k": settings.search_top_k_after,
-            "score_threshold": settings.reranker_score_threshold,
-        },
+        "reranker": {"query": query},
     }, search_limiter)
 
-    return search_response(documents)
+    return _search_response(documents)
 
 
 @tool(
     name="filtered_search",
     title="Filtered search",
     description=(
-        "Hybrid search restricted by metadata; all supplied filters must match. "
-        "Returns ranked chunks as ids with a short snippet; read promising "
-        "ones with `read_chunks`."
+        "Hybrid search restricted by metadata: within a list any value "
+        "matches, across filters all must match. Take keyword and entity "
+        "values from chunks read with `read_chunks`. Returns ranked chunks as "
+        "ids with a short snippet; read promising ones with `read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -180,23 +185,20 @@ async def filtered_search(
     keywords: Annotated[list[str], Field(
         default=[],
         max_length=5,
-        description=(
-            "Match any enriched keyword. Use known exact terms."
-        ),
+        description="Match any enriched keyword. Use known exact terms.",
     )],
     entities: Annotated[list[str], Field(
         default=[],
         max_length=5,
         description=(
-            "Match any exact person, organization, product, or location; list name variants."
+            "Match any exact person, organization, product, or location; "
+            "list name variants."
         ),
     )],
     content_types: Annotated[list[str], Field(
         default=[],
         max_length=5,
-        description=(
-            "Match any structural type, e.g. text, table, list_item, or code."
-        ),
+        description="Match any structural type, e.g. text, table, list_item, or code.",
     )],
     date_from: Annotated[date | None, Field(
         default=None,
@@ -204,7 +206,10 @@ async def filtered_search(
     )],
     date_to: Annotated[date | None, Field(
         default=None,
-        description="Latest mentioned date, inclusive; bounds may match different dates in one chunk.",
+        description=(
+            "Latest mentioned date, inclusive; bounds may match different "
+            "dates in one chunk."
+        ),
     )],
     modified_from: Annotated[date | None, Field(
         default=None,
@@ -233,7 +238,7 @@ async def filtered_search(
                 key=f"meta.{field}",
                 match=MatchAny(any=entities),
             )
-            for field in _ENTITY_FIELDS
+            for field in ENTITY_FIELDS
         ]))
 
     if content_types:
@@ -273,21 +278,17 @@ async def filtered_search(
     documents, candidates = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
-        "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
-        "sparse_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
-        "reranker": {
-            "query": query,
-            "top_k": settings.search_top_k_after,
-            "score_threshold": settings.reranker_score_threshold,
-        },
+        "dense_retriever": {"filters": filters},
+        "sparse_retriever": {"filters": filters},
+        "reranker": {"query": query},
     }, search_limiter)
 
     if filters is None:
-        return search_response(documents)
+        return _search_response(documents)
 
-    return search_response(documents, no_match_hint=(
-        "No chunk matches the filters. Use values exactly as they appear in "
-        "earlier hits, or drop some filters."
+    return _search_response(documents, no_match_hint=(
+        "No chunk matches all filters. Take keyword and entity values from "
+        "chunks you have read, or drop filters one at a time."
         if candidates == 0 else
         f"{candidates} chunk(s) match the filters, but none is relevant enough "
         "to the query. Rephrase the query or relax the filters."
@@ -311,9 +312,7 @@ async def find_related(
     ctx: Context,
     chunk_ids: Annotated[list[str], Field(
         min_length=1, max_length=2,
-        description=(
-            "One or two search-hit ids whose entities define the expansion."
-        ),
+        description="One or two search-hit ids whose entities define the expansion.",
     )],
     query: Query,
 ) -> SearchResult:
@@ -322,11 +321,7 @@ async def find_related(
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    seeds = await document_store.filter_documents_async(
-        filters=Filter(must=[FieldCondition(
-            key="id",
-            match=MatchAny(any=chunk_ids),
-        )]))
+    seeds = await document_store.get_documents_by_id_async(chunk_ids)
 
     if not seeds:
         return SearchResult(
@@ -340,7 +335,7 @@ async def find_related(
     entities = sorted({
         entity
         for seed in seeds
-        for field in _ENTITY_FIELDS
+        for field in ENTITY_FIELDS
         for entity in seed.meta.get(field, [])
     })
 
@@ -359,7 +354,7 @@ async def find_related(
                 key=f"meta.{field}",
                 match=MatchAny(any=entities),
             )
-            for field in _ENTITY_FIELDS
+            for field in ENTITY_FIELDS
         ],
         must_not=[FieldCondition(
             key="id",
@@ -370,16 +365,12 @@ async def find_related(
     documents, candidates = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
         "sparse_embedder": {"text": query},
-        "dense_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
-        "sparse_retriever": {"top_k": settings.search_top_k_before, "filters": filters},
-        "reranker": {
-            "query": query,
-            "top_k": settings.search_top_k_after,
-            "score_threshold": settings.reranker_score_threshold,
-        },
+        "dense_retriever": {"filters": filters},
+        "sparse_retriever": {"filters": filters},
+        "reranker": {"query": query},
     }, search_limiter)
 
-    return search_response(documents, no_match_hint=(
+    return _search_response(documents, no_match_hint=(
         "No other chunk mentions these entities. Continue with another search."
         if candidates == 0 else
         f"{candidates} chunk(s) mention the same entities, but none is relevant "

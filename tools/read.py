@@ -2,6 +2,7 @@ from typing import Annotated
 
 from fastmcp import Context
 from fastmcp.tools import tool
+from haystack import Document
 from mcp.types import ToolAnnotations
 from pydantic import Field
 from qdrant_client.http.models import (
@@ -13,10 +14,38 @@ from qdrant_client.http.models import (
 )
 
 from config import get_settings
-from schemas.results import ReadResult
-from tools._serializer import read_response
+from schemas.results import ChunkContent, ReadResult
+from services.rustfs import RustfsStore
 
 settings = get_settings()
+
+
+def _read_response(
+    documents: list[Document],
+    rustfs_store: RustfsStore,
+) -> ReadResult:
+
+    chunks: list[ChunkContent] = []
+
+    for document in documents:
+
+        url = rustfs_store.presigned_url(document.meta["source"])
+        page = document.meta.get("page_number")
+        chunks.append(ChunkContent.model_validate({
+            **document.meta,
+            "id": document.id,
+            # fragment stays client-side, so the presigned signature is unaffected
+            "url": f"{url}#page={page}" if page else url,
+            "page": page,
+            "content": document.content,
+        }))
+
+    return ReadResult(
+        hint="" if chunks else (
+            "No chunks found. Pass the full ids exactly as returned by a search."
+        ),
+        chunks=chunks,
+    )
 
 
 @tool(
@@ -40,23 +69,19 @@ async def read_chunks(
     document_store = ctx.lifespan_context["document_store"]
     rustfs_store = ctx.lifespan_context["rustfs_store"]
 
-    documents = await document_store.filter_documents_async(
-        filters=Filter(must=[FieldCondition(
-            key="id",
-            match=MatchAny(any=chunk_ids),
-        )]))
+    documents = await document_store.get_documents_by_id_async(chunk_ids)
 
-    return read_response(documents, rustfs_store)
+    return _read_response(documents, rustfs_store)
 
 
 @tool(
     name="read_neighbors",
     title="Read surrounding chunks",
     description=(
-        "Read the chunks immediately before and after the given ids within "
-        "their source document, in document order — recovers the context "
-        "around a promising hit. Returns the complete text of each, with its "
-        "source, page and a temporary link to cite."
+        "Read the given chunks together with the chunks immediately before "
+        "and after them in their source document, in document order — "
+        "recovers the context around a promising hit. Returns the complete "
+        "text of each, with its source, page and a temporary link to cite."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -73,23 +98,17 @@ async def read_neighbors(
     window: Annotated[int, Field(
         ge=1, le=2,
         default=1,
-        description=(
-            "Chunks before and after each id. Defaults to 1."
-        ),
+        description="Chunks before and after each id. Defaults to 1.",
     )],
 ) -> ReadResult:
 
     document_store = ctx.lifespan_context["document_store"]
     rustfs_store = ctx.lifespan_context["rustfs_store"]
 
-    seeds = await document_store.filter_documents_async(
-        filters=Filter(must=[FieldCondition(
-            key="id",
-            match=MatchAny(any=chunk_ids),
-        )]))
+    seeds = await document_store.get_documents_by_id_async(chunk_ids)
 
     if not seeds:
-        return read_response([], rustfs_store)
+        return _read_response([], rustfs_store)
 
     conditions: list[Condition] = []
 
@@ -119,4 +138,4 @@ async def read_neighbors(
         document.meta["chunk_index"],
     ))
 
-    return read_response(neighbors, rustfs_store)
+    return _read_response(neighbors, rustfs_store)

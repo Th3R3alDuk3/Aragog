@@ -1,7 +1,3 @@
-from dotenv import load_dotenv
-
-load_dotenv()
-
 from argparse import ArgumentParser
 from asyncio import Semaphore, gather, run
 from datetime import UTC, datetime
@@ -45,11 +41,18 @@ async def index_batch(
                             file_path.stat().st_mtime, tz=UTC).isoformat(),
                     } for file_path in file_paths],
                 },
-            })
+            }, include_outputs_from={"converter"})
 
         except Exception as error:
             print(f"[{batch_num}/{total_batches}] {len(file_paths)} file(s) "
                 f"→ FAILED: {error}")
+            return False
+
+        # the converter skips files it cannot convert instead of raising
+        converted = len(result["converter"]["documents"])
+        if converted < len(file_paths):
+            print(f"[{batch_num}/{total_batches}] {len(file_paths)} file(s) "
+                f"→ FAILED: only {converted} converted")
             return False
 
         chunks_written = result.get("writer", {}).get("documents_written", 0)
@@ -66,7 +69,8 @@ async def index_batch(
 
 async def main():
 
-    parser = ArgumentParser(description="Index documents into the Qdrant document store")
+    parser = ArgumentParser(
+        description="Index documents into the Qdrant document store")
 
     parser.add_argument("file_paths", nargs="+", type=Path,
         help="Paths to the files to be indexed")
@@ -76,6 +80,9 @@ async def main():
         help="Number of files per indexing batch")
 
     args = parser.parse_args()
+
+    if args.concurrency < 1 or args.batch_size < 1:
+        parser.error("concurrency and batch size must be at least 1")
 
     if not_files := [str(path) for path in args.file_paths if not path.is_file()]:
         parser.error(f"not a file: {', '.join(not_files)}")
@@ -88,7 +95,8 @@ async def main():
     batches = [list(batch) for batch in batched(args.file_paths, args.batch_size)]
 
     results = await gather(*[
-        index_batch(rustfs_store, indexing_pipeline, batch, semaphore, batch_num, len(batches))
+        index_batch(
+            rustfs_store, indexing_pipeline, batch, semaphore, batch_num, len(batches))
         for batch_num, batch in enumerate(batches, 1)
     ])
 

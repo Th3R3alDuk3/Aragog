@@ -5,9 +5,11 @@ volumes:
   qdrant_data:
 
 x-vllm: &vllm
-  image: vllm/vllm-openai:v0.29.0
+  image: vllm/vllm-openai:v0.30.0
   restart: unless-stopped
   ipc: host
+  environment:
+    VLLM_NO_USAGE_STATS: "1"
   volumes:
     - ./data/huggingface:/root/.cache/huggingface
   deploy:
@@ -22,6 +24,7 @@ services:
 
   server:
     build: .
+    container_name: aragog
     restart: unless-stopped
     depends_on:
       - rustfs
@@ -29,6 +32,9 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    environment:
+      # rich wraps log records at 80 columns without a TTY
+      FASTMCP_ENABLE_RICH_LOGGING: "false"
     volumes:
       - ./data:/app/data
     extra_hosts:
@@ -36,9 +42,10 @@ services:
 
   rustfs:
     image: docker.io/rustfs/rustfs:1.0.0
+    container_name: rustfs
     restart: unless-stopped
     ports:
-      # not loopback: RUSTFS_PUBLIC_URL is embedded in presigned links the browser opens
+      # not loopback: browsers open the presigned links
       - "0.0.0.0:9000:9000"
       - "127.0.0.1:9001:9001"
     volumes:
@@ -46,11 +53,15 @@ services:
     environment:
       RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
-      # empty: log to stdout instead of a file inside the container
+      # empty: log to stdout
       RUSTFS_OBS_LOG_DIRECTORY: ""
+      # 1.0.0 seeds new buckets as relaxed, unsafe on a single node
+      RUSTFS_NEW_BUCKET_DURABILITY_MODE: strict
+      RUSTFS_CHECK_UPDATES: "false"
 
   qdrant:
     image: docker.io/qdrant/qdrant:v1.19.1
+    container_name: qdrant
     restart: unless-stopped
     ports:
       - "127.0.0.1:6333:6333"
@@ -60,18 +71,22 @@ services:
     environment:
       QDRANT__LOG_LEVEL: INFO
       QDRANT__SERVICE__API_KEY: ${QDRANT_TOKEN}
+      QDRANT__TELEMETRY_DISABLED: "true"
 
   docling:
-    image: quay.io/docling-project/docling-serve:v1.34.0
+    image: quay.io/docling-project/docling-serve:v1.36.0
+    container_name: docling
     restart: unless-stopped
     ports:
       - "127.0.0.1:5001:5001"
     environment:
-      - DOCLING_SERVE_ENABLE_UI=True
-      - DOCLING_SERVE_MAX_SYNC_WAIT=${DOCLING_TIMEOUT}
+      DOCLING_SERVE_ENABLE_UI: "true"
+      DOCLING_SERVE_MAX_SYNC_WAIT: ${DOCLING_TIMEOUT}
+      ORT_DISABLE_TELEMETRY: "1"
 
   embedder:
     <<: *vllm
+    container_name: embedder
     ports:
       - "127.0.0.1:8001:8000"
     command: >
@@ -86,6 +101,7 @@ services:
 
   reranker:
     <<: *vllm
+    container_name: reranker
     ports:
       - "127.0.0.1:8002:8000"
     command: >

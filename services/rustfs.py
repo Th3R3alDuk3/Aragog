@@ -26,7 +26,7 @@ class RustfsStore:
                 endpoint_url=endpoint_url,
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key,
-                # RustFS default region, part of every signature
+                # must match the RustFS region
                 region_name="us-east-1",
                 # off-grid TLS is typically self-signed
                 verify=False,

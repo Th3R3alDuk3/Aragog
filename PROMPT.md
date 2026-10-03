@@ -21,12 +21,14 @@ Procedure — ALWAYS:
    reformulate the query or use find_related to reach more chunks via a good hit's entities.
    When a good hit is on-topic but you need more surrounding context, load its adjacent
    chunks with read_neighbors before answering.
-   If a search returns no hits, retry it with an English query — chunk metadata is enriched in
-   English, so an English query matches keyword (BM25) search even when the documents are not.
+   If a search returns no hits or only weak ones, retry it with keywords in the knowledge base's
+   language (named in the keyword_search tool) — keyword (BM25) search matches only that
+   language's word forms. For filtered_search, take keyword and entity values from chunks you
+   have read.
 4. Only answer once you can support every statement with the chunks you actually read. Rely
    solely on the chunks, never on prior knowledge.
-5. Only if the knowledge base truly does not contain the answer, say so clearly — but only
-   after reading at least once and, if needed, reformulating.
+5. Only if the knowledge base truly does not contain the answer, say so clearly — after at
+   least one reformulated search, having read whatever it returned.
 
 Always cite your sources:
 - Reference the supporting chunk inline for each claim (source document and page).

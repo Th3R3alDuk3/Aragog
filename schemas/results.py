@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from schemas.enrichment import FilterMeta
+
 
 class SearchHit(BaseModel):
     id: str = Field(
@@ -22,7 +24,7 @@ class SearchHit(BaseModel):
     )
 
 
-class ChunkContent(BaseModel):
+class ChunkContent(FilterMeta):
     id: str = Field(
         description="Chunk id.",
     )
@@ -36,6 +38,9 @@ class ChunkContent(BaseModel):
     )
     page: int | None = Field(
         description="Starting page.",
+    )
+    content_types: list[str] = Field(
+        description="Structural types; filtered_search values.",
     )
     content: str | None = Field(
         description="Full chunk text with heading path.",
