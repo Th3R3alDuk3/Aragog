@@ -26,7 +26,8 @@ stays a thin, stateless retrieval layer. Off grid means it: every bundled servic
 telemetry and update checks switched off.
 
 Enrichment adds context, keywords, hypothetical questions, entities and dates to every
-chunk — the metadata `filtered_search` filters on.
+chunk: context and questions go into the embeddings; keywords, entities, content types,
+mentioned dates and the modification date are what `filtered_search` filters on.
 
 ```mermaid
 flowchart LR
@@ -109,7 +110,9 @@ batch prints its result, so a working setup looks like `[1/1] 1 file(s) → 42 c
 > Chunk ids are derived from source, position and content, so re-indexing unchanged files
 > updates them in place and a failed run can simply be repeated. Changed content gets new
 > ids and the old chunks stay behind — rebuild the collection after editing files or
-> swapping the converter/chunker.
+> swapping the converter/chunker. Qdrant creates the phrase index behind `exact_search`
+> together with the collection; an older collection still answers phrase queries, but by
+> scanning every chunk.
 
 ### 4. Connect OpenWebUI
 
@@ -125,10 +128,11 @@ search → read → cite workflow.
 |:---|:---|
 | `keyword_and_semantic_search(query)` | **Default** — dense + sparse, fused by reranker |
 | `semantic_search(query)` | Dense retrieval (by meaning) + rerank |
-| `keyword_search(query)` | Sparse/BM25 retrieval (exact terms) + rerank |
-| `filtered_search(query, …)` | Hybrid + exact filter on keywords, entities, content types, dates |
-| `find_related(chunk_ids, query, …)` | More chunks mentioning the same entities as a hit |
-| `read_chunks(chunk_ids)` | Full content of chunks by id, with their keywords, entities and dates for `filtered_search` |
+| `keyword_search(query)` | Sparse/BM25 retrieval (keywords, stemmed) + rerank |
+| `exact_search(phrase, query)` | Chunks containing an exact word sequence (codes, § references, names) + rerank |
+| `filtered_search(query, …)` | Hybrid + exact filter on keywords, entities, content types, dates, modification date |
+| `find_related(chunk_ids, query)` | More chunks mentioning the same entities as a hit |
+| `read_chunks(chunk_ids)` | Full content of chunks by id, with modification date, keywords, entities and dates for `filtered_search` |
 | `read_neighbors(chunk_ids, window)` | Full content of the chunks surrounding a hit |
 
 Searches return chunk ids with snippets — the agent picks from those and reads on.

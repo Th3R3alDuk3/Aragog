@@ -53,7 +53,8 @@ def _read_response(
     title="Read chunks",
     description=(
         "Read chunks in full by id (from a search result). Returns the complete "
-        "text of each, with its source, page and a temporary link to cite."
+        "text of each with source, page and modification date, the keywords, "
+        "entities and dates for `filtered_search`, and a temporary link to cite."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -81,7 +82,8 @@ async def read_chunks(
         "Read the given chunks together with the chunks immediately before "
         "and after them in their source document, in document order — "
         "recovers the context around a promising hit. Returns the complete "
-        "text of each, with its source, page and a temporary link to cite."
+        "text of each with source, page and modification date, the keywords, "
+        "entities and dates for `filtered_search`, and a temporary link to cite."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,

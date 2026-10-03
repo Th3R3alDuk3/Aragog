@@ -15,6 +15,7 @@ from qdrant_client.http.models import (
     FieldCondition,
     Filter,
     MatchAny,
+    MatchPhrase,
 )
 
 from config import get_settings
@@ -44,8 +45,8 @@ async def _run_search(
                 inputs, include_outputs_from={"joiner", "retriever"})
     except PipelineRuntimeError as error:
         raise ToolError(
-            "The retrieval backend timed out or is temporarily unavailable. "
-            "Retry this search in a moment."
+            "The retrieval backend timed out or failed. Retry this search once; "
+            "if it fails again, report that instead of searching further."
         ) from error
 
     candidates = (result.get("joiner") or result["retriever"])["documents"]
@@ -55,9 +56,8 @@ async def _run_search(
 def _search_response(
     documents: list[Document],
     no_match_hint: str = (
-        "No matches. Reformulate or broaden the query once more; if the topic "
-        "is likely outside the knowledge base, say so instead of searching "
-        "again. Use `filtered_search` only with metadata from chunks you read."
+        "No matches. Rephrase or broaden the query once more; if the topic is "
+        "likely outside the knowledge base, say so instead of searching again."
     ),
 ) -> SearchResult:
     # no url: the agent must read a chunk before it may cite one
@@ -79,11 +79,11 @@ def _search_response(
     name="keyword_and_semantic_search",
     title="Keyword + semantic search",
     description=(
-        "Search the knowledge base by meaning and exact terms at once. The "
-        "default — use it unless you need a single modality or metadata "
-        "filters. Decompose complex questions into several searches. Returns "
-        "ranked chunks as ids with a short snippet; read promising ones with "
-        "`read_chunks`."
+        "Search the knowledge base by meaning and keywords at once. The "
+        "default — use it unless you need a single modality, a verbatim phrase "
+        "(`exact_search`) or metadata filters (`filtered_search`). Decompose "
+        "complex questions into several searches. Returns ranked chunks as ids "
+        "with a short snippet; read promising ones with `read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -109,8 +109,9 @@ async def keyword_and_semantic_search(
     name="semantic_search",
     title="Semantic search",
     description=(
-        "Search by meaning only. Use when the wording varies but the concept "
-        "is stable; otherwise prefer `keyword_and_semantic_search`. Returns "
+        "Search by meaning only — the dense half of "
+        "`keyword_and_semantic_search`. Use when keyword hits crowd out "
+        "paraphrases; otherwise prefer `keyword_and_semantic_search`. Returns "
         "ranked chunks as ids with a short snippet; read promising ones with "
         "`read_chunks`."
     ),
@@ -130,17 +131,24 @@ async def semantic_search(
         "reranker": {"query": query},
     }, search_limiter)
 
-    return _search_response(documents)
+    # dense retrieval always has candidates, so an empty result is a threshold miss
+    return _search_response(documents, no_match_hint=(
+        "No chunk is relevant enough by meaning alone. Try "
+        "`keyword_and_semantic_search` once; if the topic is likely outside "
+        "the knowledge base, say so instead of searching again."
+    ))
 
 
 @tool(
     name="keyword_search",
     title="Keyword search",
     description=(
-        "Search by exact terms only (BM25). Use for names, codes or domain "
-        "terms where the exact wording matters; otherwise prefer "
-        "`keyword_and_semantic_search`. Returns ranked chunks as ids with a "
-        "short snippet; read promising ones with `read_chunks`."
+        "Search by keywords only (BM25: stemmed, any order) — the sparse half "
+        "of `keyword_and_semantic_search`. Use for single terms when "
+        "meaning-based hits drift; for a name or exact word sequence use "
+        "`exact_search`; otherwise prefer `keyword_and_semantic_search`. "
+        "Returns ranked chunks as ids with a short snippet; read promising "
+        "ones with `read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -149,9 +157,8 @@ async def keyword_search(
     ctx: Context,
     query: Annotated[Query, Field(
         description=(
-            "Exact names, codes, or terms in "
-            f"{settings.sparse_embedding_language.title()}; use short phrases, "
-            "not questions."
+            f"Keywords in {settings.sparse_embedding_language.title()}; "
+            "single terms, not questions."
         ),
     )],
 ) -> SearchResult:
@@ -159,22 +166,88 @@ async def keyword_search(
     sparse_pipeline = ctx.lifespan_context["sparse_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
 
-    documents, _ = await _run_search(sparse_pipeline, {
+    documents, candidates = await _run_search(sparse_pipeline, {
         "embedder": {"text": query},
         "reranker": {"query": query},
     }, search_limiter)
 
-    return _search_response(documents)
+    if candidates:
+        return _search_response(documents)
+
+    return _search_response(documents, no_match_hint=(
+        "No chunk shares a searchable term with this query — stopwords do not "
+        f"count, and terms must be {settings.sparse_embedding_language.title()} "
+        "base forms. Try `keyword_and_semantic_search`."
+    ))
+
+
+@tool(
+    name="exact_search",
+    title="Exact phrase search",
+    description=(
+        "Search chunks that contain an exact word sequence — codes, "
+        "identifiers, § references, names or quoted wording. Case-insensitive, "
+        "punctuation is ignored, word order matters; matches are ranked by "
+        "the query, or by the phrase itself without one. Returns ranked chunks "
+        "as ids with a short snippet; read promising ones with `read_chunks`."
+    ),
+    annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    timeout=settings.tool_timeout,
+)
+async def exact_search(
+    ctx: Context,
+    phrase: Annotated[str, StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=200,
+    ), Field(
+        description=(
+            "The word sequence as it appears in the text, e.g. `RX-7800-B`, "
+            "`§ 823 BGB` or `Wilma Wundersinn`."
+        ),
+    )],
+    query: Annotated[str, StringConstraints(
+        strip_whitespace=True, max_length=800,
+    ), Field(
+        default="",
+        description="What to rank the matching chunks by; defaults to the phrase.",
+    )],
+) -> SearchResult:
+
+    hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
+    search_limiter = ctx.lifespan_context["search_limiter"]
+
+    text = query or phrase
+    filters = Filter(must=[FieldCondition(
+        key="content",
+        match=MatchPhrase(phrase=phrase),
+    )])
+
+    documents, candidates = await _run_search(hybrid_pipeline, {
+        "dense_embedder": {"text": text},
+        "sparse_embedder": {"text": text},
+        "dense_retriever": {"filters": filters},
+        "sparse_retriever": {"filters": filters},
+        # without a query the phrase match itself is the relevance criterion
+        "reranker": {"query": text} if query else {"query": text, "score_threshold": 0.0},
+    }, search_limiter)
+
+    return _search_response(documents, no_match_hint=(
+        "No chunk contains this exact word sequence. Check the spelling, "
+        "shorten the phrase, or use `keyword_search` for single terms."
+        if candidates == 0 else
+        f"At least {candidates} chunk(s) contain the phrase, but none is "
+        "relevant enough to the query. Rephrase the query or leave it empty."
+    ))
 
 
 @tool(
     name="filtered_search",
     title="Filtered search",
     description=(
-        "Hybrid search restricted by metadata: within a list any value "
-        "matches, across filters all must match. Take keyword and entity "
-        "values from chunks read with `read_chunks`. Returns ranked chunks as "
-        "ids with a short snippet; read promising ones with `read_chunks`."
+        "Hybrid search restricted by metadata — needs at least one filter: "
+        "within a list any value matches, across filters all must match. Take "
+        "keyword and entity values from chunks read with `read_chunks`. "
+        "Returns ranked chunks as ids with a short snippet; read promising "
+        "ones with `read_chunks`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -185,14 +258,14 @@ async def filtered_search(
     keywords: Annotated[list[str], Field(
         default=[],
         max_length=5,
-        description="Match any enriched keyword. Use known exact terms.",
+        description="Match any enriched keyword; exact and case-sensitive.",
     )],
     entities: Annotated[list[str], Field(
         default=[],
         max_length=5,
         description=(
-            "Match any exact person, organization, product, or location; "
-            "list name variants."
+            "Match any person, organization, product, or location; exact and "
+            "case-sensitive, so list name variants."
         ),
     )],
     content_types: Annotated[list[str], Field(
@@ -206,10 +279,7 @@ async def filtered_search(
     )],
     date_to: Annotated[date | None, Field(
         default=None,
-        description=(
-            "Latest mentioned date, inclusive; bounds may match different "
-            "dates in one chunk."
-        ),
+        description="Latest mentioned date, inclusive.",
     )],
     modified_from: Annotated[date | None, Field(
         default=None,
@@ -223,6 +293,13 @@ async def filtered_search(
 
     hybrid_pipeline = ctx.lifespan_context["hybrid_pipeline"]
     search_limiter = ctx.lifespan_context["search_limiter"]
+
+    if (date_from and date_to and date_from > date_to) or (
+            modified_from and modified_to and modified_from > modified_to):
+        return SearchResult(
+            hint="Inverted date range: the earliest date is after the latest.",
+            hits=[],
+        )
 
     conditions: list[Condition] = []
 
@@ -247,33 +324,34 @@ async def filtered_search(
             match=MatchAny(any=content_types),
         ))
 
-    if date_from:
+    if date_from or date_to:
         conditions.append(FieldCondition(
             key="meta.dates",
-            range=DatetimeRange(gte=date_from),
+            # one condition, so both bounds apply to the same date of a chunk
+            range=DatetimeRange(gte=date_from, lte=date_to),
         ))
 
-    if date_to:
-        conditions.append(FieldCondition(
-            key="meta.dates",
-            range=DatetimeRange(lte=date_to),
-        ))
-
-    if modified_from:
+    if modified_from or modified_to:
         conditions.append(FieldCondition(
             key="meta.modified_at",
-            range=DatetimeRange(gte=datetime.combine(
-                modified_from, time.min, tzinfo=UTC)),
+            range=DatetimeRange(
+                gte=datetime.combine(modified_from, time.min, tzinfo=UTC)
+                if modified_from else None,
+                lte=datetime.combine(modified_to, time.max, tzinfo=UTC)
+                if modified_to else None,
+            ),
         ))
 
-    if modified_to:
-        conditions.append(FieldCondition(
-            key="meta.modified_at",
-            range=DatetimeRange(lte=datetime.combine(
-                modified_to, time.max, tzinfo=UTC)),
-        ))
+    if not conditions:
+        return SearchResult(
+            hint=(
+                "Provide at least one filter; without filters use "
+                "`keyword_and_semantic_search`."
+            ),
+            hits=[],
+        )
 
-    filters = Filter(must=conditions) if conditions else None
+    filters = Filter(must=conditions)
 
     documents, candidates = await _run_search(hybrid_pipeline, {
         "dense_embedder": {"text": query},
@@ -283,15 +361,12 @@ async def filtered_search(
         "reranker": {"query": query},
     }, search_limiter)
 
-    if filters is None:
-        return _search_response(documents)
-
     return _search_response(documents, no_match_hint=(
         "No chunk matches all filters. Take keyword and entity values from "
         "chunks you have read, or drop filters one at a time."
         if candidates == 0 else
-        f"{candidates} chunk(s) match the filters, but none is relevant enough "
-        "to the query. Rephrase the query or relax the filters."
+        f"At least {candidates} chunk(s) match the filters, but none is "
+        "relevant enough to the query. Rephrase the query or relax the filters."
     ))
 
 
@@ -373,6 +448,7 @@ async def find_related(
     return _search_response(documents, no_match_hint=(
         "No other chunk mentions these entities. Continue with another search."
         if candidates == 0 else
-        f"{candidates} chunk(s) mention the same entities, but none is relevant "
-        "enough to the query. Rephrase the query toward what they would say."
+        f"At least {candidates} chunk(s) mention the same entities, but none "
+        "is relevant enough to the query. Rephrase the query toward what they "
+        "would say."
     ))

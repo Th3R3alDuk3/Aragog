@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from schemas.enrichment import FilterMeta
@@ -5,7 +7,7 @@ from schemas.enrichment import FilterMeta
 
 class SearchHit(BaseModel):
     id: str = Field(
-        description="Use with read_chunks.",
+        description="Pass to read_chunks, read_neighbors or find_related.",
     )
     score: float = Field(
         description="Rerank score; higher is better.",
@@ -38,6 +40,9 @@ class ChunkContent(FilterMeta):
     )
     page: int | None = Field(
         description="Starting page.",
+    )
+    modified_at: datetime = Field(
+        description="Source modification time; filtered_search value.",
     )
     content_types: list[str] = Field(
         description="Structural types; filtered_search values.",

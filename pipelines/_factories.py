@@ -19,10 +19,16 @@ from haystack_integrations.components.retrievers.qdrant import (
     QdrantSparseEmbeddingRetriever,
 )
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+from qdrant_client.http.models import (
+    PayloadSchemaType,
+    TextIndexParams,
+    TextIndexType,
+    TokenizerType,
+)
 
 from components.chunker import DoclingHybridChunker
 from config import get_settings
-from schemas.enrichment import EnrichedMeta
+from schemas.enrichment import ENTITY_FIELDS, EnrichedMeta
 from services.rustfs import RustfsStore
 
 settings = get_settings()
@@ -50,6 +56,26 @@ def build_rustfs_store() -> RustfsStore:
 #-----------------------------------------------------
 
 
+# every field the tools filter on; Qdrant creates payload indexes with the collection only
+PAYLOAD_INDEXES = [
+    {"field_name": "id", "field_schema": PayloadSchemaType.KEYWORD},
+    {"field_name": "meta.source", "field_schema": PayloadSchemaType.KEYWORD},
+    {"field_name": "meta.chunk_index", "field_schema": PayloadSchemaType.INTEGER},
+    {"field_name": "meta.keywords", "field_schema": PayloadSchemaType.KEYWORD},
+    {"field_name": "meta.content_types", "field_schema": PayloadSchemaType.KEYWORD},
+    {"field_name": "meta.dates", "field_schema": PayloadSchemaType.DATETIME},
+    {"field_name": "meta.modified_at", "field_schema": PayloadSchemaType.DATETIME},
+    *({"field_name": f"meta.{field}", "field_schema": PayloadSchemaType.KEYWORD}
+      for field in ENTITY_FIELDS),
+    {"field_name": "content", "field_schema": TextIndexParams(
+        type=TextIndexType.TEXT,
+        # `word` keeps numbers and codes, `multilingual` drops them
+        tokenizer=TokenizerType.WORD,
+        phrase_matching=True,
+    )},
+]
+
+
 def build_document_store() -> QdrantDocumentStore:
     return QdrantDocumentStore(
         url=settings.qdrant_url,
@@ -61,6 +87,7 @@ def build_document_store() -> QdrantDocumentStore:
         sparse_idf=True,
         similarity="cosine",
         recreate_index=False,
+        payload_fields_to_index=PAYLOAD_INDEXES,
     )
 
 
@@ -220,7 +247,7 @@ def build_sparse_text_embedder() -> FastembedSparseTextEmbedder:
 
 
 #-----------------------------------------------------
-# Retriever (Dense + Sparse)
+# Retrievers (Dense + Sparse)
 #-----------------------------------------------------
 
 
