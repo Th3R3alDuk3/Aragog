@@ -1,15 +1,15 @@
 [project]
 name = "A-RAG-OG"
-version = "0.6.0"
+version = "0.6.1"
 description = "Agentic RAG, Off Grid — a self-hosted hybrid-RAG MCP server for OpenWebUI"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "boto3>=1.43.107",
+    "boto3>=1.43.108",
     "docling-core[chunking]>=2.99.0",
     "docling-serve-haystack>=1.1.1",
     "fastembed-haystack>=2.7.0",
-    "fastmcp>=4.0.10",
+    "fastmcp>=4.0.11",
     "haystack-ai>=3.3.0",
     "pydantic-settings>=2.15.0",
     "qdrant-client>=1.19.1",

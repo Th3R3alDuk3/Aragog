@@ -5,7 +5,7 @@ volumes:
   qdrant_data:
 
 x-vllm: &vllm
-  image: vllm/vllm-openai:v0.30.0
+  image: vllm/vllm-openai:v0.31.0
   restart: unless-stopped
   ipc: host
   environment:
@@ -41,7 +41,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   rustfs:
-    image: docker.io/rustfs/rustfs:1.0.0
+    image: docker.io/rustfs/rustfs:1.0.1
     container_name: rustfs
     restart: unless-stopped
     ports:
@@ -60,7 +60,7 @@ services:
       RUSTFS_CHECK_UPDATES: "false"
 
   qdrant:
-    image: docker.io/qdrant/qdrant:v1.19.1
+    image: docker.io/qdrant/qdrant:v1.19.2
     container_name: qdrant
     restart: unless-stopped
     ports:
