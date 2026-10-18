@@ -11,6 +11,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.13-E09B0A?style=flat-square&logo=python&logoColor=white" alt="Python 3.13">
   <img src="https://img.shields.io/badge/MCP-streamable--http-F97316?style=flat-square" alt="MCP streamable-http">
+  <img src="https://img.shields.io/badge/OpenWebUI-%E2%89%A5%200.12.0-C2410C?style=flat-square" alt="OpenWebUI ≥ 0.12.0">
   <img src="https://img.shields.io/badge/self--hosted-docker%20compose-8B4A2B?style=flat-square&logo=docker&logoColor=white" alt="Self-hosted via Docker Compose">
   <img src="https://img.shields.io/badge/license-MIT-1C1917?style=flat-square" alt="MIT license">
 </p>
@@ -26,8 +27,8 @@ stays a thin, stateless retrieval layer. Off grid means it: every bundled servic
 telemetry and update checks switched off.
 
 Enrichment adds context, keywords, hypothetical questions, entities and dates to every
-chunk: context and questions go into the embeddings; keywords, entities, content types,
-mentioned dates and the modification date are what `filtered_search` filters on.
+chunk: context, keywords and questions go into the embeddings; keywords, entities, content
+types, mentioned dates and the modification date are what `filtered_search` filters on.
 
 ```mermaid
 flowchart LR
@@ -60,9 +61,9 @@ flowchart LR
 
 One compose file runs the whole stack: MCP server, RustFS, Qdrant, Docling, embedder and
 reranker. **Requires** Docker, plus the NVIDIA container toolkit for the bundled embedder
-and reranker. Every endpoint is a plain OpenAI-compatible URL, so pointing
-`DENSE_EMBEDDING_URL` / `RERANKER_URL` at an external service drops both the GPU and those
-two containers.
+and reranker. The embedder is any OpenAI-compatible `/embeddings` endpoint and the reranker
+any `/rerank` endpoint in vLLM's format, so pointing `DENSE_EMBEDDING_URL` / `RERANKER_URL`
+at an external service drops both the GPU and those two containers.
 
 ### 1. Configure
 
@@ -80,7 +81,7 @@ working defaults:
 |:---|:---|
 | `ENRICHER_URL`<br>`ENRICHER_MODEL`<br>`ENRICHER_TOKEN` | An OpenAI-compatible endpoint whose model supports structured output (`json_schema`).<br>Preset is OpenRouter + `deepseek/deepseek-v4-flash` — just add your key. |
 | `RUSTFS_PUBLIC_URL` | The address a **browser** reaches RustFS at, e.g. `http://192.168.1.10:9000`.<br>Source links are presigned for this host. |
-| `JWT_SECRET` | OpenWebUI's own secret key — the server verifies OpenWebUI's JWTs with it. |
+| `JWT_SECRET` | OpenWebUI's `WEBUI_SECRET_KEY` — the server verifies OpenWebUI's JWTs with it. |
 | `RUSTFS_SECRET_KEY`<br>`QDRANT_TOKEN`<br>… | Your own passwords (every example says `whatever`). |
 
 ### 2. Start
@@ -90,8 +91,9 @@ docker compose up -d --build
 ```
 
 The first start downloads the embedding and reranking models into `./data/huggingface`,
-which takes a while. Name the services you want to skip the bundled ones, e.g.
-`docker compose up -d --build server rustfs qdrant docling`.
+which takes a while; the first index run fetches the chunker tokenizer and the BM25 model.
+Then set `HF_HUB_OFFLINE=1` so the server starts without internet. Name the services you
+want to skip the bundled ones, e.g. `docker compose up -d --build server rustfs qdrant docling`.
 
 ### 3. Index documents
 
@@ -116,9 +118,12 @@ batch prints its result, so a working setup looks like `[1/1] 1 file(s) → 42 c
 
 ### 4. Connect OpenWebUI
 
-Point OpenWebUI's MCP integration at `http://HOST:8000/mcp` (streamable-http), then give
-that model the system prompt from [PROMPT.md](PROMPT.md), which enforces the
-search → read → cite workflow.
+Point OpenWebUI's MCP integration at `http://HOST:8000/mcp` (streamable-http, auth type
+*Session*, so OpenWebUI sends the user's JWT). OpenWebUI ≥ 0.12.0 hands the server's MCP
+instructions — the search → read → cite workflow — to the model; give the RAG model the
+system prompt from [PROMPT.md](PROMPT.md), which restricts answers to the knowledge base and
+sets the citation format, and switch off its *Builtin Tools* — otherwise smaller models fall
+back to OpenWebUI's own knowledge tools when a search comes back empty.
 
 ---
 
@@ -132,8 +137,8 @@ search → read → cite workflow.
 | `exact_search(phrase, query)` | Chunks containing an exact word sequence (codes, § references, names) + rerank |
 | `filtered_search(query, …)` | Hybrid + exact filter on keywords, entities, content types, dates, modification date |
 | `find_related(chunk_ids, query)` | More chunks mentioning the same entities as a hit |
-| `read_chunks(chunk_ids)` | Full content of chunks by id, with modification date, keywords, entities and dates for `filtered_search` |
-| `read_neighbors(chunk_ids, window)` | Full content of the chunks surrounding a hit |
+| `read_chunks(chunk_ids)` | Full content of chunks by id, with a citable link, modification date, keywords, entities and dates for `filtered_search` |
+| `read_neighbors(chunk_ids, window)` | The same for the chunks surrounding a hit |
 
 Searches return chunk ids with snippets — the agent picks from those and reads on.
 

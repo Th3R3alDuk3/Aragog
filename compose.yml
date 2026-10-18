@@ -41,7 +41,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   rustfs:
-    image: docker.io/rustfs/rustfs:1.0.1
+    image: docker.io/rustfs/rustfs:1.0.3
     container_name: rustfs
     restart: unless-stopped
     ports:
@@ -74,7 +74,7 @@ services:
       QDRANT__TELEMETRY_DISABLED: "true"
 
   docling:
-    image: quay.io/docling-project/docling-serve:v1.36.0
+    image: quay.io/docling-project/docling-serve:v1.37.0
     container_name: docling
     restart: unless-stopped
     ports:

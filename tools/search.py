@@ -296,10 +296,9 @@ async def filtered_search(
 
     if (date_from and date_to and date_from > date_to) or (
             modified_from and modified_to and modified_from > modified_to):
-        return SearchResult(
-            hint="Inverted date range: the earliest date is after the latest.",
-            hits=[],
-        )
+        return _search_response([], no_match_hint=(
+            "Inverted date range: the earliest date is after the latest."
+        ))
 
     conditions: list[Condition] = []
 
@@ -343,13 +342,10 @@ async def filtered_search(
         ))
 
     if not conditions:
-        return SearchResult(
-            hint=(
-                "Provide at least one filter; without filters use "
-                "`keyword_and_semantic_search`."
-            ),
-            hits=[],
-        )
+        return _search_response([], no_match_hint=(
+            "Provide at least one filter; without filters use "
+            "`keyword_and_semantic_search`."
+        ))
 
     filters = Filter(must=conditions)
 
@@ -399,13 +395,10 @@ async def find_related(
     seeds = await document_store.get_documents_by_id_async(chunk_ids)
 
     if not seeds:
-        return SearchResult(
-            hint=(
-                "None of the supplied chunk ids exists. Run a search first, "
-                "then pass ids from its hits."
-            ),
-            hits=[],
-        )
+        return _search_response([], no_match_hint=(
+            "None of the supplied chunk ids exists. Run a search first, "
+            "then pass ids from its hits."
+        ))
 
     entities = sorted({
         entity
@@ -415,13 +408,10 @@ async def find_related(
     })
 
     if not entities:
-        return SearchResult(
-            hint=(
-                "The supplied chunks contain no extracted entities. Choose a "
-                "different hit, or continue with another search instead."
-            ),
-            hits=[],
-        )
+        return _search_response([], no_match_hint=(
+            "The supplied chunks contain no extracted entities. Choose a "
+            "different hit, or continue with another search instead."
+        ))
 
     filters = Filter(
         should=[

@@ -6,6 +6,7 @@ from boto3 import client as boto3_client
 from botocore.client import BaseClient
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from cachetools import TTLCache, cachedmethod
 
 
 class RustfsStore:
@@ -44,6 +45,8 @@ class RustfsStore:
         self._signer = client(public_url)
         self._bucket = bucket
         self._url_expire = url_expire
+        # one url per object for half its lifetime, so an agent never sees two variants
+        self._urls = TTLCache(maxsize=1024, ttl=url_expire / 2)
 
         try:
             self._client.head_bucket(Bucket=self._bucket)
@@ -66,6 +69,7 @@ class RustfsStore:
             ExtraArgs={"ContentType": content_type or "application/octet-stream"},
         )
 
+    @cachedmethod(lambda self: self._urls)
     def presigned_url(self,
         object_name: str,
     ) -> str:
