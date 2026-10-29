@@ -41,7 +41,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   rustfs:
-    image: docker.io/rustfs/rustfs:1.0.3
+    image: docker.io/rustfs/rustfs:1.0.4
     container_name: rustfs
     restart: unless-stopped
     ports:
@@ -57,10 +57,10 @@ services:
       RUSTFS_OBS_LOG_DIRECTORY: ""
       # 1.0.0 seeds new buckets as relaxed, unsafe on a single node
       RUSTFS_NEW_BUCKET_DURABILITY_MODE: strict
-      RUSTFS_CHECK_UPDATES: "false"
+      RUSTFS_CHECK_UPDATE: "false"
 
   qdrant:
-    image: docker.io/qdrant/qdrant:v1.19.2
+    image: docker.io/qdrant/qdrant:v1.20.0
     container_name: qdrant
     restart: unless-stopped
     ports:
@@ -74,7 +74,7 @@ services:
       QDRANT__TELEMETRY_DISABLED: "true"
 
   docling:
-    image: quay.io/docling-project/docling-serve:v1.37.0
+    image: quay.io/docling-project/docling-serve:v1.38.2
     container_name: docling
     restart: unless-stopped
     ports:
