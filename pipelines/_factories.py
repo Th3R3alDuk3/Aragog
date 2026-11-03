@@ -5,10 +5,6 @@ from haystack.components.embedders import (
 from haystack.components.extractors import LLMMetadataExtractor
 from haystack.components.generators.chat import OpenAIChatGenerator
 from haystack.utils import Secret
-from haystack_integrations.components.converters.docling_serve import (
-    DoclingServeConverter,
-    ExportType,
-)
 from haystack_integrations.components.embedders.fastembed import (
     FastembedSparseDocumentEmbedder,
     FastembedSparseTextEmbedder,
@@ -19,6 +15,7 @@ from haystack_integrations.components.retrievers.qdrant import (
     QdrantSparseEmbeddingRetriever,
 )
 from haystack_integrations.document_stores.qdrant import QdrantDocumentStore
+from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import (
     PayloadSchemaType,
     TextIndexParams,
@@ -26,29 +23,12 @@ from qdrant_client.http.models import (
     TokenizerType,
 )
 
-from components.chunker import DoclingHybridChunker
+from components.chunker import TextChunker
+from components.converter import ExportConverter
 from config import get_settings
 from schemas.enrichment import ENTITY_FIELDS, EnrichedMeta
-from services.rustfs import RustfsStore
 
 settings = get_settings()
-
-
-#-----------------------------------------------------
-# S3 Storage
-#-----------------------------------------------------
-
-
-def build_rustfs_store() -> RustfsStore:
-    return RustfsStore(
-        url=settings.rustfs_url,
-        public_url=settings.rustfs_public_url,
-        access_key=settings.rustfs_access_key,
-        secret_key=settings.rustfs_secret_key,
-        timeout=settings.rustfs_timeout,
-        bucket=settings.rustfs_bucket,
-        url_expire=settings.rustfs_url_expire,
-    )
 
 
 #-----------------------------------------------------
@@ -56,17 +36,17 @@ def build_rustfs_store() -> RustfsStore:
 #-----------------------------------------------------
 
 
-# every field the tools filter on; Qdrant creates payload indexes with the collection only
+# every filtered field; Qdrant creates payload indexes with the collection only
 PAYLOAD_INDEXES = [
     {"field_name": "id", "field_schema": PayloadSchemaType.KEYWORD},
-    {"field_name": "meta.source", "field_schema": PayloadSchemaType.KEYWORD},
+    {"field_name": "meta.url", "field_schema": PayloadSchemaType.KEYWORD},
+    {"field_name": "meta.hash", "field_schema": PayloadSchemaType.KEYWORD},
     {"field_name": "meta.chunk_index", "field_schema": PayloadSchemaType.INTEGER},
+    {"field_name": "meta.document_facets", "field_schema": PayloadSchemaType.KEYWORD},
     {"field_name": "meta.keywords", "field_schema": PayloadSchemaType.KEYWORD},
-    {"field_name": "meta.content_types", "field_schema": PayloadSchemaType.KEYWORD},
-    {"field_name": "meta.dates", "field_schema": PayloadSchemaType.DATETIME},
-    {"field_name": "meta.modified_at", "field_schema": PayloadSchemaType.DATETIME},
     *({"field_name": f"meta.{field}", "field_schema": PayloadSchemaType.KEYWORD}
       for field in ENTITY_FIELDS),
+    {"field_name": "meta.dates", "field_schema": PayloadSchemaType.DATETIME},
     {"field_name": "content", "field_schema": TextIndexParams(
         type=TextIndexType.TEXT,
         # `word` keeps numbers and codes, `multilingual` drops them
@@ -91,35 +71,22 @@ def build_document_store() -> QdrantDocumentStore:
     )
 
 
+def build_qdrant_client() -> AsyncQdrantClient:
+    return AsyncQdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_token,
+        timeout=settings.qdrant_timeout,
+    )
+
+
 #-----------------------------------------------------
 # Converter
 #-----------------------------------------------------
 
 
-def build_converter() -> DoclingServeConverter:
-    return DoclingServeConverter(
-        base_url=settings.docling_url,
-        mode="async",
-        export_type=ExportType.JSON,
-        convert_options={
-            "image_export_mode": "placeholder",
-            "pipeline": "standard",
-            "do_ocr": True,
-            "force_ocr": False,
-            "ocr_preset": "auto",
-            "ocr_lang": ["en", "fr", "de", "es"],
-            "pdf_backend": "docling_parse",
-            "table_mode": "accurate",
-            "do_pdf_heading_hierarchy": True,
-            "abort_on_error": False,
-            "do_code_enrichment": False,
-            "do_formula_enrichment": False,
-            "do_picture_classification": False,
-            "do_picture_description": False,
-        },
-        timeout=settings.docling_timeout,
-        job_timeout=settings.docling_timeout,
-        poll_interval=5,
+def build_converter() -> ExportConverter:
+    return ExportConverter(
+        title_field=settings.document_title_field,
     )
 
 
@@ -128,8 +95,8 @@ def build_converter() -> DoclingServeConverter:
 #-----------------------------------------------------
 
 
-def build_chunker() -> DoclingHybridChunker:
-    return DoclingHybridChunker(
+def build_chunker() -> TextChunker:
+    return TextChunker(
         tokenizer=settings.chunker_tokenizer,
         max_tokens=settings.chunker_max_tokens,
     )
@@ -140,10 +107,12 @@ def build_chunker() -> DoclingHybridChunker:
 #-----------------------------------------------------
 
 
-_CHUNK_ENRICHER_PROMPT = """\
+_ENRICHER_PROMPT = """\
 You are a document metadata extraction assistant.
-The text below is one chunk excerpted from a larger document titled "{{ document.meta.source }}";
-the chunk begins with its heading path within that document.
+The text below is one chunk excerpted from a larger document.
+{% if document.meta.document_meta -%}
+Metadata of the whole document: {{ document.meta.document_meta }}
+{% endif -%}
 Analyze the chunk and extract structured metadata.
 Return only what is clearly indicated by the text.
 
@@ -151,7 +120,7 @@ Write ALL output fields (context, keywords, hypothetical_questions) in <<LANGUAG
 chunk's language — translate where the source text is not <<LANGUAGE>>. Keeping the metadata in one
 consistent language makes keyword (BM25) search reliable.
 
-Use the document title and heading path to situate the chunk (field context);
+Use the document metadata to situate the chunk (field context);
 extract every other field from the chunk content itself.
 
 Content rules for each output field:
@@ -160,7 +129,7 @@ Content rules for each output field:
 <file_content>{{ document.content }}</file_content>"""
 
 
-def build_chunk_enricher() -> LLMMetadataExtractor:
+def build_enricher() -> LLMMetadataExtractor:
 
     generation_kwargs = {
         "temperature": 0,
@@ -171,15 +140,17 @@ def build_chunk_enricher() -> LLMMetadataExtractor:
 
     # api.openai.com rejects unknown request params with 400
     if "api.openai.com" not in settings.enricher_url:
+        # thinking off: vLLM reads the template switch, OpenRouter the reasoning flag
         generation_kwargs["extra_body"] = {
             "chat_template_kwargs": {"enable_thinking": False},
+            "reasoning": {"enabled": False},
         }
 
     # vLLM-class backends never show schema descriptions to the model
     field_requirements = "\n".join(
         f"- {name}: {field.description}"
         for name, field in EnrichedMeta.model_fields.items())
-    prompt = (_CHUNK_ENRICHER_PROMPT
+    prompt = (_ENRICHER_PROMPT
         .replace("<<LANGUAGE>>", settings.enricher_language)
         .replace("<<FIELD_REQUIREMENTS>>", field_requirements))
 
@@ -281,5 +252,7 @@ def build_reranker() -> VLLMRanker:
         model=settings.reranker_model,
         top_k=settings.search_top_k_after,
         score_threshold=settings.reranker_score_threshold,
+        # retrieved through the document metadata too, so ranked with it
+        meta_fields_to_embed=["document_meta"],
         http_client_kwargs={"timeout": settings.reranker_timeout},
     )

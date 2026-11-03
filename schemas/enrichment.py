@@ -35,18 +35,20 @@ class FilterMeta(BaseModel):
         default=[],
         description=(
             "Organizations mentioned in this chunk — companies, agencies, "
-            "institutions. Always use the most complete name the chunk provides "
-            "(e.g. ['Siemens AG'], not ['Siemens']), so the same organization "
-            "gets the same string in every chunk. Empty list if none."
+            "institutions. Always use the most complete name the chunk provides, "
+            "without a leading article (e.g. ['Siemens AG'], not ['Siemens'] or "
+            "['Die Siemens AG']), so the same organization gets the same string "
+            "in every chunk. Empty list if none."
         ),
     )
     ent_products: list[str] = Field(
         default=[],
         description=(
-            "Products, software or brands mentioned in this chunk. Always use "
-            "the most complete name the chunk provides, including version or "
-            "model where given (e.g. ['Windows 11'], not ['Windows']), so the "
-            "same product gets the same string in every chunk. Empty list if none."
+            "Named products, software or brands mentioned in this chunk, not "
+            "generic terms (e.g. not ['Smartphone']). Always use the most "
+            "complete name the chunk provides, including version or model where "
+            "given (e.g. ['Windows 11'], not ['Windows']), so the same product "
+            "gets the same string in every chunk. Empty list if none."
         ),
     )
     ent_locations: list[str] = Field(
@@ -64,13 +66,13 @@ class EnrichedMeta(FilterMeta):
         default="",
         description=(
             "2-3 full sentences that situate this chunk within the overall "
-            "document AND state its key point: use the document title and the "
-            "heading path at the start of the chunk to name what the chunk is "
-            "about, then summarize what the chunk actually says (e.g. 'This "
-            "section of the Product X manual covers the warranty: 24 months "
-            "from delivery, wearing parts excluded.'). Do not simply repeat the "
-            "heading or title — write complete sentences describing the "
-            "chunk's content."
+            "document AND state its key point: use the document metadata to "
+            "name what the chunk is about, then summarize what the chunk "
+            "actually says (e.g. 'The warranty section of the Product X manual "
+            "grants 24 months from delivery, wearing parts excluded.'). Do not "
+            "simply repeat the title, and do not open with 'This chunk' or "
+            "'This section' — write complete sentences describing the chunk's "
+            "content."
         ),
     )
     hypothetical_questions: list[str] = Field(

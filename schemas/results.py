@@ -1,4 +1,4 @@
-from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -7,19 +7,13 @@ from schemas.enrichment import FilterMeta
 
 class SearchHit(BaseModel):
     id: str = Field(
-        description="Pass to read_chunks, read_neighbors or find_related.",
+        description="Pass to read_chunks or read_neighbors.",
     )
     score: float = Field(
         description="Rerank score; higher is better.",
     )
-    source: str = Field(
-        description="Source filename.",
-    )
-    page: int | None = Field(
-        description="Starting page.",
-    )
-    headings: list[str] = Field(
-        description="Section path.",
+    title: str = Field(
+        description="Document title.",
     )
     snippet: str = Field(
         description="Preview for triage; not evidence.",
@@ -30,25 +24,17 @@ class ChunkContent(FilterMeta):
     id: str = Field(
         description="Chunk id.",
     )
-    source: str = Field(
-        description="Source filename.",
+    title: str = Field(
+        description="Document title.",
     )
     url: str = Field(
-        description=(
-            "Temporary source link. Cite verbatim; it expires."
-        ),
+        description="Document link. Cite verbatim.",
     )
-    page: int | None = Field(
-        description="Starting page.",
-    )
-    modified_at: datetime = Field(
-        description="Source modification time; filtered_search value.",
-    )
-    content_types: list[str] = Field(
-        description="Structural types; filtered_search values.",
+    document_meta: dict[str, Any] = Field(
+        description="Metadata of the whole document; filtered_search values.",
     )
     content: str | None = Field(
-        description="Full chunk text with heading path.",
+        description="Full chunk text.",
     )
 
 
@@ -67,4 +53,13 @@ class ReadResult(BaseModel):
     )
     chunks: list[ChunkContent] = Field(
         description="Full chunk contents.",
+    )
+
+
+class DocumentFields(BaseModel):
+    hint: str = Field(
+        description="Next-step guidance when empty; otherwise empty.",
+    )
+    fields: dict[str, dict[str, int]] = Field(
+        description="Field → its most common exact values → number of chunks.",
     )

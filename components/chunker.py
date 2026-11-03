@@ -1,23 +1,22 @@
 from hashlib import sha256
 
-from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
-from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-from docling_core.types import DoclingDocument
 from fastmcp.utilities.logging import get_logger
 from haystack import Document, component
+from semchunk import chunkerify
+from tokenizers import Tokenizer
 
 logger = get_logger(__name__)
 
 
 @component
-class DoclingHybridChunker:
+class TextChunker:
 
     def __init__(self,
         tokenizer: str,
         max_tokens: int,
     ) -> None:
-        self._chunker = HybridChunker(
-            tokenizer=HuggingFaceTokenizer.from_pretrained(tokenizer, max_tokens))
+        # splits at paragraphs, then sentences, then words within the token limit
+        self._chunk = chunkerify(Tokenizer.from_pretrained(tokenizer), max_tokens)
 
     @component.output_types(documents=list[Document])
     def run(self,
@@ -28,41 +27,22 @@ class DoclingHybridChunker:
 
         for document in documents:
 
-            docling_document = DoclingDocument.model_validate_json(document.content)
-
-            chunks = list(self._chunker.chunk(docling_document))
+            chunks = self._chunk(document.content)
             total_chunks = len(chunks)
 
             for chunk_index, chunk in enumerate(chunks):
-
-                page_numbers = sorted({
-                    doc_item_prov.page_no
-                    for doc_item in chunk.meta.doc_items
-                    for doc_item_prov in doc_item.prov
-                })
-
-                content_types = sorted({
-                    doc_item.label.value
-                    for doc_item in chunk.meta.doc_items
-                })
-
-                content = self._chunker.contextualize(chunk)
-
                 all_chunks.append(Document(
                     id=sha256(
-                        f"{document.meta['source']}:{chunk_index}:{content}".encode()
+                        f"{document.id}:{chunk_index}:{chunk}".encode()
                     ).hexdigest(),
-                    content=content,
+                    content=chunk,
                     meta={
                         **document.meta,
-                        "headings": chunk.meta.headings or [],
-                        "page_number": min(page_numbers, default=None),
-                        "content_types": content_types,
                         "chunk_index": chunk_index,
                         "total_chunks": total_chunks,
                     },
                 ))
 
-        logger.info(f"DoclingHybridChunker: {len(documents)} doc(s) "
+        logger.info(f"TextChunker: {len(documents)} doc(s) "
             f"→ {len(all_chunks)} chunk(s)")
         return {"documents": all_chunks}

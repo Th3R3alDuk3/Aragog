@@ -30,7 +30,6 @@ COPY app.py index.py config.py ./
 COPY components ./components
 COPY schemas ./schemas
 COPY pipelines ./pipelines
-COPY services ./services
 COPY tools ./tools
 
 ENV PATH="/app/.venv/bin:$PATH"

@@ -19,14 +19,6 @@ class Settings(BaseSettings):
     # Auth (OpenWebUI JWT)
     jwt_secret: str
     jwt_algorithm: str
-    # S3 Storage
-    rustfs_url: str
-    rustfs_public_url: str
-    rustfs_access_key: str
-    rustfs_secret_key: str
-    rustfs_timeout: int
-    rustfs_bucket: str
-    rustfs_url_expire: int
     # Document Store
     qdrant_url: str
     qdrant_token: str
@@ -34,8 +26,7 @@ class Settings(BaseSettings):
     qdrant_embedding_dim: int
     qdrant_collection: str
     # Converter
-    docling_url: str
-    docling_timeout: int
+    document_title_field: str
     # Document Chunker
     chunker_tokenizer: str
     chunker_max_tokens: int

@@ -15,36 +15,22 @@ from qdrant_client.http.models import (
 
 from config import get_settings
 from schemas.results import ChunkContent, ReadResult
-from services.rustfs import RustfsStore
 
 settings = get_settings()
 
 
 def _read_response(
     documents: list[Document],
-    rustfs_store: RustfsStore,
 ) -> ReadResult:
-
-    chunks: list[ChunkContent] = []
-
-    for document in documents:
-
-        url = rustfs_store.presigned_url(document.meta["source"])
-        page = document.meta.get("page_number")
-        chunks.append(ChunkContent.model_validate({
-            **document.meta,
-            "id": document.id,
-            # fragment stays client-side, so the presigned signature is unaffected
-            "url": f"{url}#page={page}" if page else url,
-            "page": page,
-            "content": document.content,
-        }))
-
     return ReadResult(
-        hint="" if chunks else (
+        hint="" if documents else (
             "No chunks found. Pass the full ids exactly as returned by a search."
         ),
-        chunks=chunks,
+        chunks=[ChunkContent.model_validate({
+            **document.meta,
+            "id": document.id,
+            "content": document.content,
+        }) for document in documents],
     )
 
 
@@ -53,8 +39,8 @@ def _read_response(
     title="Read chunks",
     description=(
         "Read chunks in full by id (from a search result). Returns the complete "
-        "text of each with source, page and modification date, the keywords, "
-        "entities and dates for `filtered_search`, and a temporary link to cite."
+        "text of each with title, link to cite and document metadata, and "
+        "the keywords, entities and dates for `filtered_search`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -68,11 +54,10 @@ async def read_chunks(
 ) -> ReadResult:
 
     document_store = ctx.lifespan_context["document_store"]
-    rustfs_store = ctx.lifespan_context["rustfs_store"]
 
     documents = await document_store.get_documents_by_id_async(chunk_ids)
 
-    return _read_response(documents, rustfs_store)
+    return _read_response(documents)
 
 
 @tool(
@@ -80,10 +65,10 @@ async def read_chunks(
     title="Read surrounding chunks",
     description=(
         "Read the given chunks together with the chunks immediately before "
-        "and after them in their source document, in document order — "
+        "and after them in their document, in document order — "
         "recovers the context around a promising hit. Returns the complete "
-        "text of each with source, page and modification date, the keywords, "
-        "entities and dates for `filtered_search`, and a temporary link to cite."
+        "text of each with title, link to cite and document metadata, and "
+        "the keywords, entities and dates for `filtered_search`."
     ),
     annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     timeout=settings.tool_timeout,
@@ -105,12 +90,11 @@ async def read_neighbors(
 ) -> ReadResult:
 
     document_store = ctx.lifespan_context["document_store"]
-    rustfs_store = ctx.lifespan_context["rustfs_store"]
 
     seeds = await document_store.get_documents_by_id_async(chunk_ids)
 
     if not seeds:
-        return _read_response([], rustfs_store)
+        return _read_response([])
 
     conditions: list[Condition] = []
 
@@ -119,8 +103,8 @@ async def read_neighbors(
         index = seed.meta["chunk_index"]
         conditions.append(Filter(must=[
             FieldCondition(
-                key="meta.source",
-                match=MatchValue(value=seed.meta["source"]),
+                key="meta.hash",
+                match=MatchValue(value=seed.meta["hash"]),
             ),
             FieldCondition(
                 key="meta.chunk_index",
@@ -136,8 +120,8 @@ async def read_neighbors(
         filters=Filter(should=conditions))
 
     neighbors.sort(key=lambda document: (
-        document.meta["source"],
+        document.meta["hash"],
         document.meta["chunk_index"],
     ))
 
-    return _read_response(neighbors, rustfs_store)
+    return _read_response(neighbors)

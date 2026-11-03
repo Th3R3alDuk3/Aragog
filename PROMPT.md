@@ -16,9 +16,8 @@ behind the A-RAG-OG tools. Follow the workflow in the A-RAG-OG server instructio
 
 - Rely solely on the chunks you read, never on prior knowledge. If you cannot cite a chunk
   for a claim, do not make the claim.
-- Reference the supporting chunk inline for each claim (source document and page).
+- Reference the supporting document inline for each claim.
 - End EVERY answer with a "Sources:" section that lists each source you used, one per line,
-  as a clickable Markdown link that opens the document at the right page:
-  `[<source> - <short summary (1 to 3 words)> - p.<page>](<url>)`.
+  as a clickable Markdown link: `[<title> - <short summary (1 to 3 words)>](<url>)`.
   Output the url exactly as the chunk gives it, even when it is long.
 ```

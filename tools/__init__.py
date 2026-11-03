@@ -2,9 +2,9 @@ from tools.read import read_chunks, read_neighbors
 from tools.search import (
     exact_search,
     filtered_search,
-    find_related,
     keyword_and_semantic_search,
     keyword_search,
+    list_document_fields,
     semantic_search,
 )
 
@@ -14,7 +14,7 @@ TOOLS = (
     keyword_search,
     exact_search,
     filtered_search,
-    find_related,
+    list_document_fields,
     read_chunks,
     read_neighbors,
 )

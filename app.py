@@ -10,7 +10,7 @@ from fastmcp.server.middleware.rate_limiting import RateLimitingMiddleware
 from fastmcp.server.middleware.timing import DetailedTimingMiddleware
 
 from config import get_settings
-from pipelines._factories import build_document_store, build_rustfs_store
+from pipelines._factories import build_document_store, build_qdrant_client
 from pipelines.retrieval import (
     build_dense_retrieval_pipeline,
     build_hybrid_retrieval_pipeline,
@@ -67,6 +67,7 @@ class ToolCallTimingMiddleware(DetailedTimingMiddleware):
 async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
 
     document_store = build_document_store()
+    qdrant_client = build_qdrant_client()
     dense_pipeline = build_dense_retrieval_pipeline(document_store)
     sparse_pipeline = build_sparse_retrieval_pipeline(document_store)
     hybrid_pipeline = build_hybrid_retrieval_pipeline(document_store)
@@ -74,7 +75,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     try:
         yield {
             "document_store": document_store,
-            "rustfs_store": build_rustfs_store(),
+            "qdrant_client": qdrant_client,
             "dense_pipeline": dense_pipeline,
             "sparse_pipeline": sparse_pipeline,
             "hybrid_pipeline": hybrid_pipeline,
@@ -83,6 +84,7 @@ async def lifespan(server: FastMCP) -> AsyncIterator[dict]:
     finally:
 
         await document_store.close_async()
+        await qdrant_client.close()
         await dense_pipeline.close_async()
         await sparse_pipeline.close_async()
         await hybrid_pipeline.close_async()
@@ -99,22 +101,22 @@ mcp = FastMCP(
         "promising hits in full with `read_chunks` before answering, and load "
         "a hit's surrounding chunks with `read_neighbors` when it needs more "
         "context.\n"
-        "3. Decompose complex questions into several search rounds. If a "
-        "search is weak, reformulate it or use `find_related` to reach more "
-        "chunks through a good hit's entities. If it returns no or only weak "
-        "hits, retry with keywords in "
+        "3. Decompose complex questions into several search rounds and "
+        "reformulate weak searches. If one returns no or only weak hits, "
+        "retry with keywords in "
         f"{settings.sparse_embedding_language.title()} — keyword search "
         "matches only that language's word forms. Use `keyword_search` for "
         "single terms and `semantic_search` for paraphrases only when the "
         "default search drifts. For `filtered_search`, take keyword and entity "
-        "values from chunks you have read.\n"
+        "values from chunks you have read and document metadata values from "
+        "`list_document_fields`; leave its query empty to list the matching "
+        "documents.\n"
         "4. Base every statement from the knowledge base on chunks you read in "
         "full. If it does not cover the question, say so — after at least one "
         "reformulated search, having read whatever it returned.\n"
-        "5. Cite each source with its document, page and `url` from "
-        "`read_chunks` or `read_neighbors` (search hits carry none). Copy the "
-        "url verbatim and in full: its presigned query string (`X-Amz-…`) and "
-        "`#page=` fragment stop working when shortened or rewritten."
+        "5. Cite each source with its `title` and `url` from `read_chunks` or "
+        "`read_neighbors` (search hits carry no url). Copy the url verbatim "
+        "and in full — a shortened or rewritten link points nowhere."
     ),
     auth=JWTVerifier(
         public_key=settings.jwt_secret,
