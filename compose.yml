@@ -5,10 +5,11 @@ volumes:
   qdrant_data:
 
 x-vllm: &vllm
-  image: vllm/vllm-openai:v0.31.0
+  image: vllm/vllm-openai:v0.33.0
   restart: unless-stopped
   ipc: host
   environment:
+    HF_HUB_OFFLINE: ${HF_HUB_OFFLINE}
     VLLM_NO_USAGE_STATS: "1"
   volumes:
     - ./data/huggingface:/root/.cache/huggingface
@@ -23,7 +24,9 @@ x-vllm: &vllm
 services:
 
   server:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.app
     container_name: aragog
     restart: unless-stopped
     depends_on:
@@ -41,7 +44,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   rustfs:
-    image: docker.io/rustfs/rustfs:1.0.4
+    image: docker.io/rustfs/rustfs:1.0.5
     container_name: rustfs
     restart: unless-stopped
     ports:
@@ -60,7 +63,7 @@ services:
       RUSTFS_CHECK_UPDATE: "false"
 
   qdrant:
-    image: docker.io/qdrant/qdrant:v1.20.0
+    image: docker.io/qdrant/qdrant:v1.20.1
     container_name: qdrant
     restart: unless-stopped
     ports:

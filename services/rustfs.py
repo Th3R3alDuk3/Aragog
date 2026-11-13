@@ -1,5 +1,4 @@
 from asyncio import to_thread
-from mimetypes import guess_type
 from pathlib import Path
 
 from boto3 import client as boto3_client
@@ -36,7 +35,6 @@ class RustfsStore:
                     signature_version="s3v4",
                     connect_timeout=timeout,
                     read_timeout=timeout,
-                    retries={"mode": "standard"},
                 ),
             )
 
@@ -58,15 +56,12 @@ class RustfsStore:
     async def upload(self,
         file_path: Path,
     ) -> None:
-        # served inline, so browsers honour `#page=`
-        content_type, _ = guess_type(file_path.name)
         await to_thread(
             self._client.upload_file,
             Filename=file_path,
             Bucket=self._bucket,
             # index.py sets the chunks' `source` to the same name
             Key=file_path.name,
-            ExtraArgs={"ContentType": content_type or "application/octet-stream"},
         )
 
     @cachedmethod(lambda self: self._urls)

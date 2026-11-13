@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-3.13-E09B0A?style=flat-square&logo=python&logoColor=white" alt="Python 3.13">
+  <img src="https://img.shields.io/badge/python-3.14-E09B0A?style=flat-square&logo=python&logoColor=white" alt="Python 3.14">
   <img src="https://img.shields.io/badge/MCP-streamable--http-F97316?style=flat-square" alt="MCP streamable-http">
   <img src="https://img.shields.io/badge/OpenWebUI-%E2%89%A5%200.12.0-C2410C?style=flat-square" alt="OpenWebUI ≥ 0.12.0">
   <img src="https://img.shields.io/badge/self--hosted-docker%20compose-8B4A2B?style=flat-square&logo=docker&logoColor=white" alt="Self-hosted via Docker Compose">
@@ -81,7 +81,7 @@ working defaults:
 |:---|:---|
 | `ENRICHER_URL`<br>`ENRICHER_MODEL`<br>`ENRICHER_TOKEN` | An OpenAI-compatible endpoint whose model supports structured output (`json_schema`).<br>Preset is OpenRouter + `deepseek/deepseek-v4-flash` — just add your key. |
 | `RUSTFS_PUBLIC_URL` | The address a **browser** reaches RustFS at, e.g. `http://192.168.1.10:9000`.<br>Source links are presigned for this host. |
-| `JWT_SECRET` | OpenWebUI's `WEBUI_SECRET_KEY` — the server verifies OpenWebUI's JWTs with it. |
+| `JWT_ISSUER`<br>`JWT_JWKS_URI` | The Keycloak realm OpenWebUI signs users in with, `https://<keycloak>/realms/<realm>`, exactly as its tokens name it in `iss`,<br>and its signing keys, `<JWT_ISSUER>/protocol/openid-connect/certs`, as reached from the server.<br>For a corporate or self-signed CA, mount a PEM bundle with every CA to trust and set `SSL_CERT_FILE` to it. |
 | `RUSTFS_SECRET_KEY`<br>`QDRANT_TOKEN`<br>… | Your own passwords (every example says `whatever`). |
 
 ### 2. Start
@@ -92,8 +92,9 @@ docker compose up -d --build
 
 The first start downloads the embedding and reranking models into `./data/huggingface`,
 which takes a while; the first index run fetches the chunker tokenizer and the BM25 model.
-Then set `HF_HUB_OFFLINE=1` so the server starts without internet. Name the services you
-want to skip the bundled ones, e.g. `docker compose up -d --build server rustfs qdrant docling`.
+Then set `HF_HUB_OFFLINE=1` so the server, embedder and reranker start without internet.
+Name the services you want to skip the bundled ones, e.g.
+`docker compose up -d --build server rustfs qdrant docling`.
 
 ### 3. Index documents
 
@@ -118,8 +119,10 @@ batch prints its result, so a working setup looks like `[1/1] 1 file(s) → 42 c
 
 ### 4. Connect OpenWebUI
 
-Point OpenWebUI's MCP integration at `http://HOST:8000/mcp` (streamable-http, auth type
-*Session*, so OpenWebUI sends the user's JWT). OpenWebUI ≥ 0.12.0 hands the server's MCP
+Sign OpenWebUI's users in through the same Keycloak realm and point its MCP integration at
+`http://HOST:8000/mcp` (streamable-http, auth type *OAuth*, so OpenWebUI passes on the user's
+Keycloak access token; the server checks its RS256 signature and issuer and limits the rate
+per `sub`). OpenWebUI ≥ 0.12.0 hands the server's MCP
 instructions — the search → read → cite workflow — to the model; give the RAG model the
 system prompt from [PROMPT.md](PROMPT.md), which restricts answers to the knowledge base and
 sets the citation format, and switch off its *Builtin Tools* — otherwise smaller models fall
@@ -146,7 +149,7 @@ Searches return chunk ids with snippets — the agent picks from those and reads
 
 ## 🛠️ Development
 
-Needs `uv` and Python 3.13. Run the backing services in Docker and the server on the host —
+Needs `uv` and Python 3.14. Run the backing services in Docker and the server on the host —
 they are published locally, so first point `.env` at localhost instead of the compose
 hostnames:
 

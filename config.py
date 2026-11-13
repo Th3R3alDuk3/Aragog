@@ -16,9 +16,9 @@ class Settings(BaseSettings):
     search_top_k_before: int
     search_top_k_after: int
     tool_timeout: int
-    # Auth (OpenWebUI JWT)
-    jwt_secret: str
-    jwt_algorithm: str
+    # Auth (Keycloak)
+    jwt_issuer: str
+    jwt_jwks_uri: str
     # S3 Storage
     rustfs_url: str
     rustfs_public_url: str
